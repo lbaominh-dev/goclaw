@@ -30,6 +30,8 @@ func (h *ProvidersHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /v1/providers/{id}", h.auth(h.handleUpdateProvider))
 	mux.HandleFunc("DELETE /v1/providers/{id}", h.auth(h.handleDeleteProvider))
 
+	// Model listing (proxied to upstream provider API)
+	mux.HandleFunc("GET /v1/providers/{id}/models", h.auth(h.handleListProviderModels))
 }
 
 func (h *ProvidersHandler) auth(next http.HandlerFunc) http.HandlerFunc {

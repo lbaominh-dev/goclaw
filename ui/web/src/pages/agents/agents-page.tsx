@@ -96,14 +96,16 @@ export function AgentsPage() {
                 />
               ))}
             </div>
-            <Pagination
-              page={pagination.page}
-              pageSize={pagination.pageSize}
-              total={pagination.total}
-              totalPages={pagination.totalPages}
-              onPageChange={setPage}
-              onPageSizeChange={setPageSize}
-            />
+            <div className="mt-4">
+              <Pagination
+                page={pagination.page}
+                pageSize={pagination.pageSize}
+                total={pagination.total}
+                totalPages={pagination.totalPages}
+                onPageChange={setPage}
+                onPageSizeChange={setPageSize}
+              />
+            </div>
           </>
         )}
       </div>

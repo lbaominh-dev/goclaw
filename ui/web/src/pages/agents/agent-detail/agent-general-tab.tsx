@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Save, Copy, Check, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Combobox } from "@/components/ui/combobox";
 import { useProviders } from "@/pages/providers/hooks/use-providers";
+import { useProviderModels } from "@/pages/providers/hooks/use-provider-models";
 import type { AgentData } from "@/types/agent";
 
 interface AgentGeneralTabProps {
@@ -27,6 +29,12 @@ export function AgentGeneralTab({ agent, onUpdate }: AgentGeneralTabProps) {
   const [displayName, setDisplayName] = useState(agent.display_name ?? "");
   const [provider, setProvider] = useState(agent.provider);
   const [model, setModel] = useState(agent.model);
+
+  const selectedProviderId = useMemo(
+    () => enabledProviders.find((p) => p.name === provider)?.id,
+    [enabledProviders, provider],
+  );
+  const { models, loading: modelsLoading } = useProviderModels(selectedProviderId);
   const [contextWindow, setContextWindow] = useState(agent.context_window);
   const [maxToolIterations, setMaxToolIterations] = useState(agent.max_tool_iterations);
   const [workspace, setWorkspace] = useState(agent.workspace);
@@ -135,7 +143,7 @@ export function AgentGeneralTab({ agent, onUpdate }: AgentGeneralTabProps) {
             <div className="space-y-2">
               <Label>Provider</Label>
               {enabledProviders.length > 0 ? (
-                <Select value={provider} onValueChange={setProvider}>
+                <Select value={provider} onValueChange={(v) => { setProvider(v); setModel(""); }}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select provider" />
                   </SelectTrigger>
@@ -157,11 +165,11 @@ export function AgentGeneralTab({ agent, onUpdate }: AgentGeneralTabProps) {
             </div>
             <div className="space-y-2">
               <Label htmlFor="model">Model</Label>
-              <Input
-                id="model"
+              <Combobox
                 value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder="anthropic/claude-sonnet-4-5-20250929"
+                onChange={setModel}
+                options={models.map((m) => ({ value: m.id, label: m.name }))}
+                placeholder={modelsLoading ? "Loading models..." : "Enter or select model"}
               />
             </div>
           </div>

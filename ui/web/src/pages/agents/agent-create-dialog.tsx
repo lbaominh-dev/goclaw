@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -16,9 +16,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Combobox } from "@/components/ui/combobox";
 import type { AgentData } from "@/types/agent";
 import { slugify, isValidSlug } from "@/lib/slug";
 import { useProviders } from "@/pages/providers/hooks/use-providers";
+import { useProviderModels } from "@/pages/providers/hooks/use-provider-models";
 
 interface AgentCreateDialogProps {
   open: boolean;
@@ -34,6 +36,15 @@ export function AgentCreateDialog({ open, onOpenChange, onCreate }: AgentCreateD
   const [model, setModel] = useState("");
   const [agentType, setAgentType] = useState<"open" | "predefined">("open");
   const [loading, setLoading] = useState(false);
+
+  const enabledProviders = providers.filter((p) => p.enabled);
+
+  // Look up provider ID from selected provider name for model fetching
+  const selectedProviderId = useMemo(
+    () => enabledProviders.find((p) => p.name === provider)?.id,
+    [enabledProviders, provider],
+  );
+  const { models, loading: modelsLoading } = useProviderModels(selectedProviderId);
 
   const handleCreate = async () => {
     if (!agentKey.trim()) return;
@@ -60,7 +71,10 @@ export function AgentCreateDialog({ open, onOpenChange, onCreate }: AgentCreateD
     }
   };
 
-  const enabledProviders = providers.filter((p) => p.enabled);
+  const handleProviderChange = (value: string) => {
+    setProvider(value);
+    setModel("");
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -92,7 +106,7 @@ export function AgentCreateDialog({ open, onOpenChange, onCreate }: AgentCreateD
             <div className="space-y-2">
               <Label>Provider</Label>
               {enabledProviders.length > 0 ? (
-                <Select value={provider} onValueChange={setProvider}>
+                <Select value={provider} onValueChange={handleProviderChange}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select provider" />
                   </SelectTrigger>
@@ -114,10 +128,11 @@ export function AgentCreateDialog({ open, onOpenChange, onCreate }: AgentCreateD
             </div>
             <div className="space-y-2">
               <Label>Model</Label>
-              <Input
+              <Combobox
                 value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder="anthropic/claude-sonnet-4-5-20250929"
+                onChange={setModel}
+                options={models.map((m) => ({ value: m.id, label: m.name }))}
+                placeholder={modelsLoading ? "Loading models..." : "Enter or select model"}
               />
             </div>
           </div>
