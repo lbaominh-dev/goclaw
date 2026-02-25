@@ -11,6 +11,7 @@ import {
   Terminal,
   Settings,
   ShieldCheck,
+  Users,
   Link,
   Wrench,
   Plug,
@@ -56,6 +57,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
 
         <SidebarGroup label="Management" collapsed={collapsed}>
           <SidebarItem to={ROUTES.AGENTS} icon={Bot} label="Agents" collapsed={collapsed} />
+          <SidebarItem to={ROUTES.TEAMS} icon={Users} label="Agent Teams" collapsed={collapsed} />
           <SidebarItem to={ROUTES.SESSIONS} icon={History} label="Sessions" collapsed={collapsed} />
           <SidebarItem to={ROUTES.CHANNELS} icon={Radio} label="Channels" collapsed={collapsed} />
           <SidebarItem to={ROUTES.SKILLS} icon={Zap} label="Skills" collapsed={collapsed} />

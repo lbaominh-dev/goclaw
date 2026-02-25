@@ -47,6 +47,15 @@ func buildEnsureUserFiles(as store.AgentStore) agent.EnsureUserFilesFunc {
 	}
 }
 
+// buildBootstrapCleanup creates a callback that removes BOOTSTRAP.md for a user.
+// Used as a safety net after enough conversation turns, in case the LLM
+// didn't clear BOOTSTRAP.md itself. Idempotent — no-op if already cleared.
+func buildBootstrapCleanup(as store.AgentStore) agent.BootstrapCleanupFunc {
+	return func(ctx context.Context, agentID uuid.UUID, userID string) error {
+		return as.DeleteUserContextFile(ctx, agentID, userID, bootstrap.BootstrapFile)
+	}
+}
+
 // buildContextFileLoader creates the per-request context file loader callback.
 // Used by both managed and standalone modes — no mode-specific logic.
 // Delegates to the ContextFileInterceptor for type-aware routing.

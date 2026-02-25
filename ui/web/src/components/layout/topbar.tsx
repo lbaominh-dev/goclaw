@@ -17,7 +17,7 @@ export function Topbar() {
       <div className="flex items-center gap-2">
         <button
           onClick={toggleSidebar}
-          className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          className="cursor-pointer rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {sidebarCollapsed ? (
@@ -35,7 +35,7 @@ export function Topbar() {
 
         <button
           onClick={() => setTheme(isDark ? "light" : "dark")}
-          className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          className="cursor-pointer rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           title="Toggle theme"
         >
           {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -43,7 +43,7 @@ export function Topbar() {
 
         <button
           onClick={logout}
-          className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          className="cursor-pointer rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           title="Logout"
         >
           <LogOut className="h-4 w-4" />

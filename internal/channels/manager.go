@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
+	"github.com/nextlevelbuilder/goclaw/pkg/protocol"
 )
 
 // RunContext tracks an active agent run for streaming/reaction event forwarding.
@@ -256,11 +257,11 @@ func (m *Manager) HandleAgentEvent(eventType, runID string, payload interface{})
 	// Forward to StreamingChannel
 	if sc, ok := ch.(StreamingChannel); ok {
 		switch eventType {
-		case "run.started":
+		case protocol.AgentEventRunStarted:
 			if err := sc.OnStreamStart(ctx, rc.ChatID); err != nil {
 				slog.Debug("stream start failed", "channel", rc.ChannelName, "error", err)
 			}
-		case "tool.call":
+		case protocol.AgentEventToolCall:
 			// Agent is executing a tool — mark tool phase so the next chunk
 			// (new LLM iteration) resets the stream buffer.
 			// Also clear the current DraftStream so the next iteration starts
@@ -271,7 +272,7 @@ func (m *Manager) HandleAgentEvent(eventType, runID string, payload interface{})
 			if err := sc.OnStreamEnd(ctx, rc.ChatID, ""); err != nil {
 				slog.Debug("stream tool-phase end failed", "channel", rc.ChannelName, "error", err)
 			}
-		case "chunk":
+		case protocol.ChatEventChunk:
 			// Accumulate chunk deltas into full text.
 			// When entering a new LLM iteration (first chunk after tool.call),
 			// reset the buffer so we don't concatenate text from previous iterations.
@@ -296,14 +297,14 @@ func (m *Manager) HandleAgentEvent(eventType, runID string, payload interface{})
 					slog.Debug("stream chunk failed", "channel", rc.ChannelName, "error", err)
 				}
 			}
-		case "run.completed":
+		case protocol.AgentEventRunCompleted:
 			rc.mu.Lock()
 			finalText := rc.streamBuffer
 			rc.mu.Unlock()
 			if err := sc.OnStreamEnd(ctx, rc.ChatID, finalText); err != nil {
 				slog.Debug("stream end failed", "channel", rc.ChannelName, "error", err)
 			}
-		case "run.failed":
+		case protocol.AgentEventRunFailed:
 			// Clean up streaming state
 			_ = sc.OnStreamEnd(ctx, rc.ChatID, "")
 		}
@@ -313,13 +314,13 @@ func (m *Manager) HandleAgentEvent(eventType, runID string, payload interface{})
 	if reactionCh, ok := ch.(ReactionChannel); ok {
 		status := ""
 		switch eventType {
-		case "run.started":
+		case protocol.AgentEventRunStarted:
 			status = "thinking"
-		case "tool.call":
+		case protocol.AgentEventToolCall:
 			status = "tool"
-		case "run.completed":
+		case protocol.AgentEventRunCompleted:
 			status = "done"
-		case "run.failed":
+		case protocol.AgentEventRunFailed:
 			status = "error"
 		}
 		if status != "" {
@@ -330,7 +331,7 @@ func (m *Manager) HandleAgentEvent(eventType, runID string, payload interface{})
 	}
 
 	// Clean up on terminal events
-	if eventType == "run.completed" || eventType == "run.failed" {
+	if eventType == protocol.AgentEventRunCompleted || eventType == protocol.AgentEventRunFailed {
 		m.runs.Delete(runID)
 	}
 }

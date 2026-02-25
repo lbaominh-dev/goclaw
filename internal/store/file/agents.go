@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 
+	"github.com/nextlevelbuilder/goclaw/internal/bootstrap"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
@@ -27,12 +28,12 @@ func AgentUUID(key string) uuid.UUID {
 
 // agentContextFiles lists filenames read from the workspace root for agent-level context.
 var agentContextFiles = []string{
-	"AGENTS.md",
-	"SOUL.md",
-	"TOOLS.md",
-	"IDENTITY.md",
-	"HEARTBEAT.md",
-	"BOOTSTRAP.md",
+	bootstrap.AgentsFile,
+	bootstrap.SoulFile,
+	bootstrap.ToolsFile,
+	bootstrap.IdentityFile,
+	bootstrap.HeartbeatFile,
+	bootstrap.BootstrapFile,
 }
 
 // AgentEntry describes an agent to register in the FileAgentStore.
@@ -86,7 +87,7 @@ func NewFileAgentStore(dbPath string, entries []AgentEntry) (*FileAgentStore, er
 		id := AgentUUID(e.Key)
 		agentType := e.AgentType
 		if agentType == "" {
-			agentType = "open"
+			agentType = store.AgentTypeOpen
 		}
 		entry := &agentEntry{
 			data: &store.AgentData{
@@ -98,7 +99,7 @@ func NewFileAgentStore(dbPath string, entries []AgentEntry) (*FileAgentStore, er
 				AgentKey:  e.Key,
 				AgentType: agentType,
 				Workspace: e.Workspace,
-				Status:    "active",
+				Status:    store.AgentStatusActive,
 			},
 			workspace: e.Workspace,
 		}

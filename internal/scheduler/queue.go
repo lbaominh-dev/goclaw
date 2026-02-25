@@ -240,7 +240,7 @@ func (sq *SessionQueue) startOne(ctx context.Context) {
 
 	lane := sq.laneMgr.Get(sq.lane)
 	if lane == nil {
-		lane = sq.laneMgr.Get("main")
+		lane = sq.laneMgr.Get(LaneMain)
 	}
 
 	if lane == nil {

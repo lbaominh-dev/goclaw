@@ -43,15 +43,15 @@ func (l *Loop) emitLLMSpan(ctx context.Context, start time.Time, iteration int, 
 	dur := int(now.Sub(start).Milliseconds())
 	span := store.SpanData{
 		TraceID:    traceID,
-		SpanType:   "llm_call",
+		SpanType:   store.SpanTypeLLMCall,
 		Name:       fmt.Sprintf("%s/%s #%d", l.provider.Name(), l.model, iteration),
 		StartTime:  start,
 		EndTime:    &now,
 		DurationMS: dur,
 		Model:      l.model,
 		Provider:   l.provider.Name(),
-		Status:     "completed",
-		Level:      "DEFAULT",
+		Status:     store.SpanStatusCompleted,
+		Level:      store.SpanLevelDefault,
 		CreatedAt:  now,
 	}
 	if parentID := tracing.ParentSpanIDFromContext(ctx); parentID != uuid.Nil {
@@ -61,15 +61,16 @@ func (l *Loop) emitLLMSpan(ctx context.Context, start time.Time, iteration int, 
 		span.AgentID = &l.agentUUID
 	}
 
-	// Verbose mode: serialize full messages as InputPreview
-	if collector.Verbose() && len(messages) > 0 {
+	// Verbose mode: serialize full messages and output
+	verbose := collector.Verbose()
+	if verbose && len(messages) > 0 {
 		if b, err := json.Marshal(messages); err == nil {
-			span.InputPreview = truncateStr(string(b), 50000)
+			span.InputPreview = truncateStr(string(b), 100000)
 		}
 	}
 
 	if callErr != nil {
-		span.Status = "error"
+		span.Status = store.SpanStatusError
 		span.Error = callErr.Error()
 	} else if resp != nil {
 		if resp.Usage != nil {
@@ -77,7 +78,11 @@ func (l *Loop) emitLLMSpan(ctx context.Context, start time.Time, iteration int, 
 			span.OutputTokens = resp.Usage.CompletionTokens
 		}
 		span.FinishReason = resp.FinishReason
-		span.OutputPreview = truncateStr(resp.Content, 500)
+		if verbose {
+			span.OutputPreview = truncateStr(resp.Content, 100000)
+		} else {
+			span.OutputPreview = truncateStr(resp.Content, 500)
+		}
 	}
 
 	collector.EmitSpan(span)
@@ -93,18 +98,22 @@ func (l *Loop) emitToolSpan(ctx context.Context, start time.Time, toolName, tool
 
 	now := time.Now().UTC()
 	dur := int(now.Sub(start).Milliseconds())
+	previewLimit := 500
+	if collector.Verbose() {
+		previewLimit = 100000
+	}
 	span := store.SpanData{
 		TraceID:       traceID,
-		SpanType:      "tool_call",
+		SpanType:      store.SpanTypeToolCall,
 		Name:          toolName,
 		StartTime:     start,
 		EndTime:       &now,
 		DurationMS:    dur,
 		ToolName:      toolName,
 		ToolCallID:    toolCallID,
-		InputPreview:  truncateStr(input, 500),
-		OutputPreview: truncateStr(output, 500),
-		Status:        "completed",
+		InputPreview:  truncateStr(input, previewLimit),
+		OutputPreview: truncateStr(output, previewLimit),
+		Status:        store.SpanStatusCompleted,
 		Level:         "DEFAULT",
 		CreatedAt:     now,
 	}
@@ -115,7 +124,7 @@ func (l *Loop) emitToolSpan(ctx context.Context, start time.Time, toolName, tool
 		span.AgentID = &l.agentUUID
 	}
 	if isError {
-		span.Status = "error"
+		span.Status = store.SpanStatusError
 		span.Error = truncateStr(output, 200)
 	}
 
@@ -141,15 +150,15 @@ func (l *Loop) emitAgentSpan(ctx context.Context, start time.Time, result *RunRe
 	span := store.SpanData{
 		ID:         agentSpanID,
 		TraceID:    traceID,
-		SpanType:   "agent",
+		SpanType:   store.SpanTypeAgent,
 		Name:       spanName,
 		StartTime:  start,
 		EndTime:    &now,
 		DurationMS: dur,
 		Model:      l.model,
 		Provider:   l.provider.Name(),
-		Status:     "completed",
-		Level:      "DEFAULT",
+		Status:     store.SpanStatusCompleted,
+		Level:      store.SpanLevelDefault,
 		CreatedAt:  now,
 	}
 	// Nest under parent root span if this is an announce run
@@ -161,10 +170,14 @@ func (l *Loop) emitAgentSpan(ctx context.Context, start time.Time, result *RunRe
 		span.AgentID = &l.agentUUID
 	}
 	if runErr != nil {
-		span.Status = "error"
+		span.Status = store.SpanStatusError
 		span.Error = runErr.Error()
 	} else if result != nil {
-		span.OutputPreview = truncateStr(result.Content, 500)
+		limit := 500
+		if collector.Verbose() {
+			limit = 100000
+		}
+		span.OutputPreview = truncateStr(result.Content, limit)
 		// Note: token counts are NOT set on agent spans to avoid double-counting
 		// with child llm_call spans. Trace aggregation sums only llm_call spans.
 	}

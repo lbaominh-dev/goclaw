@@ -130,7 +130,7 @@ func (m *AgentsMethods) handleCreate(_ context.Context, client *gateway.Client, 
 
 	agentType := params.AgentType
 	if agentType == "" {
-		agentType = "open"
+		agentType = store.AgentTypeOpen
 	}
 
 	agentID := config.NormalizeAgentID(params.Name)
@@ -165,7 +165,7 @@ func (m *AgentsMethods) handleCreate(_ context.Context, client *gateway.Client, 
 			Provider:         m.cfg.Agents.Defaults.Provider,
 			Model:            m.cfg.Agents.Defaults.Model,
 			Workspace:        ws,
-			Status:           "active",
+			Status:           store.AgentStatusActive,
 			ToolsConfig:      params.ToolsConfig,
 			SubagentsConfig:  params.SubagentsConfig,
 			SandboxConfig:    params.SandboxConfig,
@@ -471,8 +471,8 @@ func (m *AgentsMethods) handleDelete(_ context.Context, client *gateway.Client, 
 
 // allowedAgentFiles is the list of files exposed via agents.files.* RPCs.
 var allowedAgentFiles = []string{
-	"AGENTS.md", "SOUL.md", "TOOLS.md", "IDENTITY.md",
-	"USER.md", "HEARTBEAT.md", "BOOTSTRAP.md", "MEMORY.json",
+	bootstrap.AgentsFile, bootstrap.SoulFile, bootstrap.ToolsFile, bootstrap.IdentityFile,
+	bootstrap.UserFile, bootstrap.HeartbeatFile, bootstrap.BootstrapFile, bootstrap.MemoryJSONFile,
 }
 
 func (m *AgentsMethods) handleFilesList(_ context.Context, client *gateway.Client, req *protocol.RequestFrame) {

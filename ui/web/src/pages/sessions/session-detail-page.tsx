@@ -203,7 +203,7 @@ function SystemMessageBlock({ content }: { content: string }) {
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
-              className="ml-1 text-primary hover:underline"
+              className="ml-1 cursor-pointer text-primary hover:underline"
             >
               {expanded ? "hide" : "show details"}
             </button>
@@ -246,7 +246,7 @@ function SummaryBlock({ text }: { text: string }) {
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="mt-1 text-xs font-medium text-primary hover:underline"
+          className="mt-1 cursor-pointer text-xs font-medium text-primary hover:underline"
         >
           {expanded ? "Show less" : "Show more"}
         </button>

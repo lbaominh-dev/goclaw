@@ -12,8 +12,18 @@ package scheduler
 import (
 	"context"
 	"log/slog"
+	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
+)
+
+// Lane name constants.
+const (
+	LaneMain     = "main"
+	LaneSubagent = "subagent"
+	LaneDelegate = "delegate"
+	LaneCron     = "cron"
 )
 
 // LaneConfig configures a single lane.
@@ -138,12 +148,29 @@ func NewLaneManager(configs []LaneConfig) *LaneManager {
 }
 
 // DefaultLanes returns the standard lane configuration.
+// Concurrency defaults can be overridden via env vars:
+//
+//	GOCLAW_LANE_MAIN=30
+//	GOCLAW_LANE_SUBAGENT=50
+//	GOCLAW_LANE_DELEGATE=100
+//	GOCLAW_LANE_CRON=30
 func DefaultLanes() []LaneConfig {
 	return []LaneConfig{
-		{Name: "main", Concurrency: 30},
-		{Name: "subagent", Concurrency: 30},
-		{Name: "cron", Concurrency: 10},
+		{Name: LaneMain, Concurrency: laneEnv("GOCLAW_LANE_MAIN", 30)},
+		{Name: LaneSubagent, Concurrency: laneEnv("GOCLAW_LANE_SUBAGENT", 50)},
+		{Name: LaneDelegate, Concurrency: laneEnv("GOCLAW_LANE_DELEGATE", 100)},
+		{Name: LaneCron, Concurrency: laneEnv("GOCLAW_LANE_CRON", 30)},
 	}
+}
+
+// laneEnv reads an int from an env var, falling back to defaultVal.
+func laneEnv(key string, defaultVal int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultVal
 }
 
 // Get returns a lane by name. Returns the "main" lane as fallback.
@@ -156,7 +183,7 @@ func (lm *LaneManager) Get(name string) *Lane {
 	}
 
 	// Fallback to main lane
-	if lane, ok := lm.lanes["main"]; ok {
+	if lane, ok := lm.lanes[LaneMain]; ok {
 		return lane
 	}
 

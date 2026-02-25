@@ -356,10 +356,10 @@ func buildProjectContextSection(files []bootstrap.ContextFile) []string {
 	hasBootstrap := false
 	for _, f := range files {
 		base := filepath.Base(f.Path)
-		if strings.EqualFold(base, "soul.md") {
+		if strings.EqualFold(base, bootstrap.SoulFile) {
 			hasSoul = true
 		}
-		if strings.EqualFold(base, "bootstrap.md") {
+		if strings.EqualFold(base, bootstrap.BootstrapFile) {
 			hasBootstrap = true
 		}
 	}
@@ -389,6 +389,25 @@ func buildProjectContextSection(files []bootstrap.ContextFile) []string {
 
 	for _, f := range files {
 		base := filepath.Base(f.Path)
+
+		// During bootstrap (first run), skip delegation/team files — they add noise
+		// and waste tokens when the agent should only be introducing itself.
+		if hasBootstrap && (base == bootstrap.DelegationFile || base == bootstrap.TeamFile) {
+			continue
+		}
+
+		// Virtual files (DELEGATION.md, TEAM.md) are system-injected, not on disk.
+		// Render with <system_context> so the LLM doesn't try to read/write them as files.
+		if base == bootstrap.DelegationFile || base == bootstrap.TeamFile {
+			lines = append(lines,
+				fmt.Sprintf("<system_context name=%q>", base),
+				f.Content,
+				"</system_context>",
+				"",
+			)
+			continue
+		}
+
 		lines = append(lines,
 			fmt.Sprintf("## %s", f.Path),
 			fmt.Sprintf("<context_file name=%q>", base),
@@ -472,7 +491,7 @@ func buildRuntimeSection(cfg SystemPromptConfig) []string {
 // hasBootstrapFile checks if BOOTSTRAP.md is present in the context files.
 func hasBootstrapFile(files []bootstrap.ContextFile) bool {
 	for _, f := range files {
-		if strings.EqualFold(filepath.Base(f.Path), "bootstrap.md") {
+		if strings.EqualFold(filepath.Base(f.Path), bootstrap.BootstrapFile) {
 			return true
 		}
 	}

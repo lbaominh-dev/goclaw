@@ -29,23 +29,23 @@ type telegramInstanceConfig struct {
 	AllowFrom      []string `json:"allow_from,omitempty"`
 }
 
-// Factory creates a Telegram channel from DB instance data (no agent store = no group file writer commands).
+// Factory creates a Telegram channel from DB instance data (no agent/team store).
 func Factory(name string, creds json.RawMessage, cfg json.RawMessage,
 	msgBus *bus.MessageBus, pairingSvc store.PairingStore) (channels.Channel, error) {
-	return buildChannel(name, creds, cfg, msgBus, pairingSvc, nil)
+	return buildChannel(name, creds, cfg, msgBus, pairingSvc, nil, nil)
 }
 
-// FactoryWithAgentStore returns a ChannelFactory that includes the agent store
-// for group file writer management (/addwriter, /removewriter, /writers commands).
-func FactoryWithAgentStore(agentStore store.AgentStore) channels.ChannelFactory {
+// FactoryWithStores returns a ChannelFactory that includes agent and team stores
+// for group file writer management and /tasks, /task_detail commands.
+func FactoryWithStores(agentStore store.AgentStore, teamStore store.TeamStore) channels.ChannelFactory {
 	return func(name string, creds json.RawMessage, cfg json.RawMessage,
 		msgBus *bus.MessageBus, pairingSvc store.PairingStore) (channels.Channel, error) {
-		return buildChannel(name, creds, cfg, msgBus, pairingSvc, agentStore)
+		return buildChannel(name, creds, cfg, msgBus, pairingSvc, agentStore, teamStore)
 	}
 }
 
 func buildChannel(name string, creds json.RawMessage, cfg json.RawMessage,
-	msgBus *bus.MessageBus, pairingSvc store.PairingStore, agentStore store.AgentStore) (channels.Channel, error) {
+	msgBus *bus.MessageBus, pairingSvc store.PairingStore, agentStore store.AgentStore, teamStore store.TeamStore) (channels.Channel, error) {
 
 	var c telegramCreds
 	if len(creds) > 0 {
@@ -85,7 +85,7 @@ func buildChannel(name string, creds json.RawMessage, cfg json.RawMessage,
 		tgCfg.GroupPolicy = "pairing"
 	}
 
-	ch, err := New(tgCfg, msgBus, pairingSvc, agentStore)
+	ch, err := New(tgCfg, msgBus, pairingSvc, agentStore, teamStore)
 	if err != nil {
 		return nil, err
 	}

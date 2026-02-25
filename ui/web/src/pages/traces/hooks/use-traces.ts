@@ -3,6 +3,7 @@ import { useHttp } from "@/hooks/use-ws";
 
 export interface TraceData {
   id: string;
+  parent_trace_id?: string;
   agent_id?: string;
   user_id: string;
   session_key: string;

@@ -25,15 +25,15 @@ func (sm *SubagentManager) emitLLMSpan(ctx context.Context, start time.Time, ite
 	now := time.Now().UTC()
 	span := store.SpanData{
 		TraceID:    traceID,
-		SpanType:   "llm_call",
+		SpanType:   store.SpanTypeLLMCall,
 		Name:       fmt.Sprintf("%s/%s #%d", sm.provider.Name(), model, iteration),
 		StartTime:  start,
 		EndTime:    &now,
 		DurationMS: int(now.Sub(start).Milliseconds()),
 		Model:      model,
 		Provider:   sm.provider.Name(),
-		Status:     "completed",
-		Level:      "DEFAULT",
+		Status:     store.SpanStatusCompleted,
+		Level:      store.SpanLevelDefault,
 		CreatedAt:  now,
 	}
 	if parentID := tracing.ParentSpanIDFromContext(ctx); parentID != uuid.Nil {
@@ -48,7 +48,7 @@ func (sm *SubagentManager) emitLLMSpan(ctx context.Context, start time.Time, ite
 	}
 
 	if callErr != nil {
-		span.Status = "error"
+		span.Status = store.SpanStatusError
 		span.Error = callErr.Error()
 	} else if resp != nil {
 		if resp.Usage != nil {
@@ -72,7 +72,7 @@ func (sm *SubagentManager) emitToolSpan(ctx context.Context, start time.Time, to
 	now := time.Now().UTC()
 	span := store.SpanData{
 		TraceID:       traceID,
-		SpanType:      "tool_call",
+		SpanType:      store.SpanTypeToolCall,
 		Name:          toolName,
 		StartTime:     start,
 		EndTime:       &now,
@@ -81,15 +81,15 @@ func (sm *SubagentManager) emitToolSpan(ctx context.Context, start time.Time, to
 		ToolCallID:    toolCallID,
 		InputPreview:  truncate(input, 500),
 		OutputPreview: truncate(output, 500),
-		Status:        "completed",
-		Level:         "DEFAULT",
+		Status:        store.SpanStatusCompleted,
+		Level:         store.SpanLevelDefault,
 		CreatedAt:     now,
 	}
 	if parentID := tracing.ParentSpanIDFromContext(ctx); parentID != uuid.Nil {
 		span.ParentSpanID = &parentID
 	}
 	if isError {
-		span.Status = "error"
+		span.Status = store.SpanStatusError
 		span.Error = truncate(output, 200)
 	}
 	collector.EmitSpan(span)
@@ -111,7 +111,7 @@ func (sm *SubagentManager) emitSubagentSpan(ctx context.Context, spanID uuid.UUI
 	span := store.SpanData{
 		ID:            spanID,
 		TraceID:       traceID,
-		SpanType:      "agent",
+		SpanType:      store.SpanTypeAgent,
 		Name:          fmt.Sprintf("subagent:%s", task.Label),
 		StartTime:     start,
 		EndTime:       &now,
@@ -119,15 +119,15 @@ func (sm *SubagentManager) emitSubagentSpan(ctx context.Context, spanID uuid.UUI
 		Model:         model,
 		Provider:      sm.provider.Name(),
 		OutputPreview: truncate(output, 500),
-		Status:        "completed",
-		Level:         "DEFAULT",
+		Status:        store.SpanStatusCompleted,
+		Level:         store.SpanLevelDefault,
 		CreatedAt:     now,
 	}
 	if parentSpanID != uuid.Nil {
 		span.ParentSpanID = &parentSpanID
 	}
-	if task.Status == "failed" || task.Status == "cancelled" {
-		span.Status = "error"
+	if task.Status == TaskStatusFailed || task.Status == TaskStatusCancelled {
+		span.Status = store.SpanStatusError
 		span.Error = truncate(task.Result, 200)
 	}
 	collector.EmitSpan(span)

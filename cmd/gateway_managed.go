@@ -85,6 +85,7 @@ func wireManagedExtras(
 		TraceCollector:    traceCollector,
 		EnsureUserFiles:   ensureUserFiles,
 		ContextFileLoader: contextFileLoader,
+		BootstrapCleanup:  buildBootstrapCleanup(stores.Agents),
 		InjectionAction:   injectionAction,
 		MaxMessageChars:        appCfg.Gateway.MaxMessageChars,
 		CompactionCfg:          appCfg.Agents.Defaults.Compaction,
@@ -93,6 +94,8 @@ func wireManagedExtras(
 		SandboxContainerDir:    sandboxContainerDir,
 		SandboxWorkspaceAccess: sandboxWorkspaceAccess,
 		DynamicLoader:          dynamicLoader,
+		AgentLinkStore:         stores.AgentLinks,
+		TeamStore:              stores.Teams,
 		OnEvent: func(event agent.AgentEvent) {
 			msgBus.Broadcast(bus.Event{
 				Name:    protocol.EventAgent,
@@ -232,6 +235,73 @@ func wireManagedExtras(
 			// Invalidate all agent caches so they re-resolve with updated tools
 			agentRouter.InvalidateAll()
 		})
+	}
+
+	// Register delegate tool (inter-agent delegation) if link store is available.
+	// Uses a callback to bridge tools.DelegateRunRequest → agent.RunRequest,
+	// avoiding import cycle between tools and agent packages.
+	if stores.AgentLinks != nil && stores.Agents != nil {
+		runAgentFn := func(ctx context.Context, agentKey string, req tools.DelegateRunRequest) (*tools.DelegateRunResult, error) {
+			loop, err := agentRouter.Get(agentKey)
+			if err != nil {
+				return nil, err
+			}
+			result, err := loop.Run(ctx, agent.RunRequest{
+				SessionKey:        req.SessionKey,
+				Message:           req.Message,
+				UserID:            req.UserID,
+				Channel:           req.Channel,
+				ChatID:            req.ChatID,
+				PeerKind:          req.PeerKind,
+				RunID:             req.RunID,
+				Stream:            req.Stream,
+				ExtraSystemPrompt: req.ExtraSystemPrompt,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return &tools.DelegateRunResult{
+				Content:    result.Content,
+				Iterations: result.Iterations,
+			}, nil
+		}
+		delegateMgr := tools.NewDelegateManager(runAgentFn, stores.AgentLinks, stores.Agents, msgBus)
+		if stores.Teams != nil {
+			delegateMgr.SetTeamStore(stores.Teams)
+		}
+		delegateMgr.SetSessionStore(stores.Sessions)
+		toolsReg.Register(tools.NewDelegateTool(delegateMgr))
+
+		// Register delegate_search tool (hybrid FTS + semantic agent discovery)
+		var delegateEmbProvider store.EmbeddingProvider
+		if agentStore, ok := stores.Agents.(*pg.PGAgentStore); ok {
+			memCfg := appCfg.Agents.Defaults.Memory
+			if embProvider := resolveEmbeddingProvider(appCfg, memCfg); embProvider != nil {
+				agentStore.SetEmbeddingProvider(embProvider)
+				delegateEmbProvider = embProvider
+				slog.Info("managed mode: agent embeddings enabled")
+
+				// Backfill embeddings for existing agents with frontmatter
+				go func() {
+					count, err := agentStore.BackfillAgentEmbeddings(context.Background())
+					if err != nil {
+						slog.Warn("agent embeddings backfill failed", "error", err)
+					} else if count > 0 {
+						slog.Info("agent embeddings backfill complete", "updated", count)
+					}
+				}()
+			}
+		}
+		toolsReg.Register(tools.NewDelegateSearchTool(stores.AgentLinks, delegateEmbProvider))
+		slog.Info("managed mode: delegate + delegate_search tools registered")
+	}
+
+	// Register team tools (team_tasks + team_message) if team store is available.
+	if stores.Teams != nil && stores.Agents != nil {
+		teamMgr := tools.NewTeamToolManager(stores.Teams, stores.Agents, msgBus)
+		toolsReg.Register(tools.NewTeamTasksTool(teamMgr))
+		toolsReg.Register(tools.NewTeamMessageTool(teamMgr))
+		slog.Info("managed mode: team tools registered")
 	}
 
 	slog.Info("managed mode: resolver + interceptors + cache subscribers wired")

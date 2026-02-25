@@ -19,6 +19,8 @@ export const ROUTES = {
   NODES: "/nodes",
   LOGS: "/logs",
   PROVIDERS: "/providers",
+  TEAMS: "/teams",
+  TEAM_DETAIL: "/teams/:id",
   CUSTOM_TOOLS: "/custom-tools",
   MCP: "/mcp",
   TTS: "/tts",

@@ -14,6 +14,8 @@ package permissions
 import (
 	"strings"
 	"sync"
+
+	"github.com/nextlevelbuilder/goclaw/pkg/protocol"
 )
 
 // Role represents a user's permission level.
@@ -146,14 +148,23 @@ func MethodScopes(method string) []Scope {
 
 func isAdminMethod(method string) bool {
 	adminMethods := []string{
-		"config.apply",
-		"config.patch",
-		"agents.create",
-		"agents.update",
-		"agents.delete",
-		"channels.toggle",
-		"device.pair.approve",
-		"device.pair.revoke",
+		protocol.MethodConfigApply,
+		protocol.MethodConfigPatch,
+		protocol.MethodAgentsCreate,
+		protocol.MethodAgentsUpdate,
+		protocol.MethodAgentsDelete,
+		protocol.MethodAgentsLinksList,
+		protocol.MethodAgentsLinksCreate,
+		protocol.MethodAgentsLinksUpdate,
+		protocol.MethodAgentsLinksDelete,
+		protocol.MethodChannelsToggle,
+		protocol.MethodPairingApprove,
+		protocol.MethodPairingRevoke,
+		protocol.MethodTeamsList,
+		protocol.MethodTeamsCreate,
+		protocol.MethodTeamsGet,
+		protocol.MethodTeamsDelete,
+		protocol.MethodTeamsTaskList,
 	}
 	for _, m := range adminMethods {
 		if method == m {
@@ -165,21 +176,21 @@ func isAdminMethod(method string) bool {
 
 func isWriteMethod(method string) bool {
 	writePrefixes := []string{
-		"chat.send",
-		"chat.abort",
-		"sessions.delete",
-		"sessions.reset",
-		"sessions.patch",
-		"cron.create",
-		"cron.update",
-		"cron.delete",
-		"cron.toggle",
-		"skills.update",
+		protocol.MethodChatSend,
+		protocol.MethodChatAbort,
+		protocol.MethodSessionsDelete,
+		protocol.MethodSessionsReset,
+		protocol.MethodSessionsPatch,
+		protocol.MethodCronCreate,
+		protocol.MethodCronUpdate,
+		protocol.MethodCronDelete,
+		protocol.MethodCronToggle,
+		protocol.MethodSkillsUpdate,
 		"pairing.",
 		"device.pair.",
 		"approvals.",
 		"exec.approval.",
-		"send",
+		protocol.MethodSend,
 	}
 	for _, prefix := range writePrefixes {
 		if strings.HasPrefix(method, prefix) {

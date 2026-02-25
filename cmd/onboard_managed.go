@@ -115,13 +115,13 @@ func seedManagedData(dsn string, cfg *config.Config) error {
 		AgentKey:            "default",
 		DisplayName:         "Default Agent",
 		OwnerID:             "system",
-		AgentType:           "open",
+		AgentType:           store.AgentTypeOpen,
 		Provider:            defaultProvider,
 		Model:               modelID,
 		Workspace:           workspace,
 		RestrictToWorkspace: true,
 		IsDefault:           true,
-		Status:              "active",
+		Status:              store.AgentStatusActive,
 		SubagentsConfig:     json.RawMessage(`{"maxSpawnDepth":1,"maxConcurrent":20}`),
 	}
 

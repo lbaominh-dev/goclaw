@@ -106,7 +106,7 @@ func (h *AgentsHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	req.OwnerID = userID
 	if req.AgentType == "" {
-		req.AgentType = "open"
+		req.AgentType = store.AgentTypeOpen
 	}
 	if req.ContextWindow <= 0 {
 		req.ContextWindow = 200000
@@ -133,10 +133,10 @@ func (h *AgentsHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	// Check if predefined agent has a description for LLM summoning
 	description := extractDescription(req.OtherConfig)
-	if req.AgentType == "predefined" && description != "" && h.summoner != nil {
-		req.Status = "summoning"
+	if req.AgentType == store.AgentTypePredefined && description != "" && h.summoner != nil {
+		req.Status = store.AgentStatusSummoning
 	} else if req.Status == "" {
-		req.Status = "active"
+		req.Status = store.AgentStatusActive
 	}
 
 	if err := h.agents.Create(r.Context(), &req); err != nil {
@@ -151,7 +151,7 @@ func (h *AgentsHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Start LLM summoning in background if applicable
-	if req.Status == "summoning" {
+	if req.Status == store.AgentStatusSummoning {
 		go h.summoner.SummonAgent(req.ID, req.Provider, req.Model, description)
 	}
 
@@ -229,8 +229,8 @@ func (h *AgentsHandler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Invalidate caches: agent Loop + bootstrap files
-	h.emitCacheInvalidate("agent", ag.AgentKey)
-	h.emitCacheInvalidate("bootstrap", id.String())
+	h.emitCacheInvalidate(bus.CacheKindAgent, ag.AgentKey)
+	h.emitCacheInvalidate(bus.CacheKindBootstrap, id.String())
 
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "true"})
 }
@@ -260,8 +260,8 @@ func (h *AgentsHandler) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Invalidate caches: agent Loop + bootstrap files
-	h.emitCacheInvalidate("agent", ag.AgentKey)
-	h.emitCacheInvalidate("bootstrap", id.String())
+	h.emitCacheInvalidate(bus.CacheKindAgent, ag.AgentKey)
+	h.emitCacheInvalidate(bus.CacheKindBootstrap, id.String())
 
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "true"})
 }
@@ -391,7 +391,7 @@ func (h *AgentsHandler) handleRegenerate(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only owner can regenerate agent"})
 		return
 	}
-	if ag.Status == "summoning" {
+	if ag.Status == store.AgentStatusSummoning {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is already being summoned"})
 		return
 	}
@@ -413,14 +413,14 @@ func (h *AgentsHandler) handleRegenerate(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Set status to summoning
-	if err := h.agents.Update(r.Context(), id, map[string]any{"status": "summoning"}); err != nil {
+	if err := h.agents.Update(r.Context(), id, map[string]any{"status": store.AgentStatusSummoning}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
 	go h.summoner.RegenerateAgent(id, ag.Provider, ag.Model, req.Prompt)
 
-	writeJSON(w, http.StatusAccepted, map[string]string{"ok": "true", "status": "summoning"})
+	writeJSON(w, http.StatusAccepted, map[string]string{"ok": "true", "status": store.AgentStatusSummoning})
 }
 
 // handleResummon re-runs SummonAgent from scratch using the original description.
@@ -442,7 +442,7 @@ func (h *AgentsHandler) handleResummon(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only owner can resummon agent"})
 		return
 	}
-	if ag.Status == "summoning" {
+	if ag.Status == store.AgentStatusSummoning {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is already being summoned"})
 		return
 	}
@@ -457,14 +457,14 @@ func (h *AgentsHandler) handleResummon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.agents.Update(r.Context(), id, map[string]any{"status": "summoning"}); err != nil {
+	if err := h.agents.Update(r.Context(), id, map[string]any{"status": store.AgentStatusSummoning}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
 	go h.summoner.SummonAgent(id, ag.Provider, ag.Model, description)
 
-	writeJSON(w, http.StatusAccepted, map[string]string{"ok": "true", "status": "summoning"})
+	writeJSON(w, http.StatusAccepted, map[string]string{"ok": "true", "status": store.AgentStatusSummoning})
 }
 
 // extractDescription pulls the description string from other_config JSONB.

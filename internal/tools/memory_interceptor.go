@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/nextlevelbuilder/goclaw/internal/bootstrap"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
@@ -19,7 +20,7 @@ func isMemoryPath(path, workspace string) bool {
 
 	// Root-level MEMORY.md or memory.md
 	dir := filepath.Dir(clean)
-	if (dir == "." || dir == "/" || dir == "") && (base == "MEMORY.md" || base == "memory.md") {
+	if (dir == "." || dir == "/" || dir == "") && (base == bootstrap.MemoryFile || base == bootstrap.MemoryAltFile) {
 		return true
 	}
 
@@ -31,7 +32,7 @@ func isMemoryPath(path, workspace string) bool {
 	// Absolute path at workspace root or under workspace/memory/
 	if workspace != "" && filepath.IsAbs(clean) {
 		cleanWS := filepath.Clean(workspace)
-		if filepath.Dir(clean) == cleanWS && (base == "MEMORY.md" || base == "memory.md") {
+		if filepath.Dir(clean) == cleanWS && (base == bootstrap.MemoryFile || base == bootstrap.MemoryAltFile) {
 			return true
 		}
 		memDir := filepath.Join(cleanWS, "memory")

@@ -16,7 +16,7 @@ func (sm *SubagentManager) scheduleArchive(taskID string, after time.Duration) {
 	time.Sleep(after)
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	if t, ok := sm.tasks[taskID]; ok && t.Status != "running" {
+	if t, ok := sm.tasks[taskID]; ok && t.Status != TaskStatusRunning {
 		delete(sm.tasks, taskID)
 		slog.Debug("subagent archived", "id", taskID)
 	}
@@ -53,7 +53,7 @@ func (sm *SubagentManager) CancelTask(id string) bool {
 	if id == "all" {
 		cancelled := false
 		for _, t := range sm.tasks {
-			if t.Status == "running" {
+			if t.Status == TaskStatusRunning {
 				sm.cancelTaskLocked(t)
 				cancelled = true
 			}
@@ -64,7 +64,7 @@ func (sm *SubagentManager) CancelTask(id string) bool {
 	if id == "last" {
 		var latest *SubagentTask
 		for _, t := range sm.tasks {
-			if t.Status == "running" {
+			if t.Status == TaskStatusRunning {
 				if latest == nil || t.CreatedAt > latest.CreatedAt {
 					latest = t
 				}
@@ -78,7 +78,7 @@ func (sm *SubagentManager) CancelTask(id string) bool {
 	}
 
 	t, ok := sm.tasks[id]
-	if !ok || t.Status != "running" {
+	if !ok || t.Status != TaskStatusRunning {
 		return false
 	}
 	sm.cancelTaskLocked(t)
@@ -91,7 +91,7 @@ func (sm *SubagentManager) CancelTasksForParent(parentID string) int {
 	defer sm.mu.Unlock()
 	count := 0
 	for _, t := range sm.tasks {
-		if t.ParentID == parentID && t.Status == "running" {
+		if t.ParentID == parentID && t.Status == TaskStatusRunning {
 			sm.cancelTaskLocked(t)
 			count++
 		}
@@ -102,7 +102,7 @@ func (sm *SubagentManager) CancelTasksForParent(parentID string) int {
 // cancelTaskLocked sets a task to cancelled and fires its context cancel.
 // Must be called with sm.mu held.
 func (sm *SubagentManager) cancelTaskLocked(t *SubagentTask) {
-	t.Status = "cancelled"
+	t.Status = TaskStatusCancelled
 	t.Result = "cancelled by user"
 	t.CompletedAt = time.Now().UnixMilli()
 	if t.cancelFunc != nil {
@@ -123,7 +123,7 @@ func (sm *SubagentManager) Steer(
 		sm.mu.Unlock()
 		return "", fmt.Errorf("subagent %q not found", taskID)
 	}
-	if t.Status != "running" {
+	if t.Status != TaskStatusRunning {
 		sm.mu.Unlock()
 		return "", fmt.Errorf("subagent %q is not running (status=%s)", taskID, t.Status)
 	}

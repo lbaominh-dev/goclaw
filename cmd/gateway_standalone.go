@@ -65,9 +65,9 @@ func wireStandaloneExtras(
 	// Seed predefined agents' context files to disk
 	bgCtx := context.Background()
 	for _, e := range entries {
-		if e.AgentType == "predefined" {
+		if e.AgentType == store.AgentTypePredefined {
 			id := file.AgentUUID(e.Key)
-			if _, seedErr := bootstrap.SeedToStore(bgCtx, fileStore, id, "predefined"); seedErr != nil {
+			if _, seedErr := bootstrap.SeedToStore(bgCtx, fileStore, id, store.AgentTypePredefined); seedErr != nil {
 				slog.Warn("failed to seed predefined agent context files", "agent", e.Key, "error", seedErr)
 			}
 		}

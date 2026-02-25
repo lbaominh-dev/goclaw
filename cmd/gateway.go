@@ -640,7 +640,7 @@ func runGateway() {
 	var instanceLoader *channels.InstanceLoader
 	if managedStores != nil && managedStores.ChannelInstances != nil {
 		instanceLoader = channels.NewInstanceLoader(managedStores.ChannelInstances, managedStores.Agents, channelMgr, msgBus, pairingStore)
-		instanceLoader.RegisterFactory("telegram", telegram.FactoryWithAgentStore(managedStores.Agents))
+		instanceLoader.RegisterFactory("telegram", telegram.FactoryWithStores(managedStores.Agents, managedStores.Teams))
 		instanceLoader.RegisterFactory("discord", discord.Factory)
 		instanceLoader.RegisterFactory("feishu", feishu.Factory)
 		instanceLoader.RegisterFactory("zalo_oa", zalo.Factory)
@@ -653,7 +653,7 @@ func runGateway() {
 	// Register config-based channels as fallback (standalone mode only).
 	// In managed mode, channels are loaded from DB via instanceLoader — skip config-based registration.
 	if cfg.Channels.Telegram.Enabled && cfg.Channels.Telegram.Token != "" && instanceLoader == nil {
-		tg, err := telegram.New(cfg.Channels.Telegram, msgBus, pairingStore, nil)
+		tg, err := telegram.New(cfg.Channels.Telegram, msgBus, pairingStore, nil, nil)
 		if err != nil {
 			slog.Error("failed to initialize telegram channel", "error", err)
 		} else {
@@ -708,6 +708,16 @@ func runGateway() {
 	// Register channel instances WS RPC methods (managed mode only)
 	if managedStores != nil && managedStores.ChannelInstances != nil {
 		methods.NewChannelInstancesMethods(managedStores.ChannelInstances, msgBus).Register(server.Router())
+	}
+
+	// Register agent links WS RPC methods (managed mode only)
+	if managedStores != nil && managedStores.AgentLinks != nil && managedStores.Agents != nil {
+		methods.NewAgentLinksMethods(managedStores.AgentLinks, managedStores.Agents, agentRouter).Register(server.Router())
+	}
+
+	// Register agent teams WS RPC methods (managed mode only)
+	if managedStores != nil && managedStores.Teams != nil {
+		methods.NewTeamsMethods(managedStores.Teams, managedStores.Agents, managedStores.AgentLinks, agentRouter).Register(server.Router())
 	}
 
 	// Cache invalidation: reload channel instances on changes.

@@ -28,8 +28,11 @@ const (
 	UserFile      = "USER.md"
 	HeartbeatFile = "HEARTBEAT.md"
 	BootstrapFile = "BOOTSTRAP.md"
-	MemoryFile    = "MEMORY.md"
-	MemoryAltFile = "memory.md"
+	DelegationFile = "DELEGATION.md"
+	TeamFile       = "TEAM.md"
+	MemoryFile     = "MEMORY.md"
+	MemoryAltFile  = "memory.md"
+	MemoryJSONFile = "MEMORY.json"
 )
 
 // standardFiles is the ordered list of bootstrap files to load.

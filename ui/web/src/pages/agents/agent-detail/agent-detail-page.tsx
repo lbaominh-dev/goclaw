@@ -8,6 +8,7 @@ import { AgentGeneralTab } from "./agent-general-tab";
 import { AgentConfigTab } from "./agent-config-tab";
 import { AgentFilesTab } from "./agent-files-tab";
 import { AgentSharesTab } from "./agent-shares-tab";
+import { AgentLinksTab } from "./agent-links-tab";
 import { SummoningModal } from "../summoning-modal";
 import { DeferredSpinner } from "@/components/shared/loading-skeleton";
 
@@ -102,6 +103,7 @@ export function AgentDetailPage({ agentId, onBack }: AgentDetailPageProps) {
             <TabsTrigger value="config">Config</TabsTrigger>
             <TabsTrigger value="files">Files</TabsTrigger>
             <TabsTrigger value="shares">Shares</TabsTrigger>
+            <TabsTrigger value="links">Links</TabsTrigger>
           </TabsList>
 
           <TabsContent value="general" className="mt-4">
@@ -124,6 +126,10 @@ export function AgentDetailPage({ agentId, onBack }: AgentDetailPageProps) {
 
           <TabsContent value="shares" className="mt-4">
             <AgentSharesTab agentId={agentId} />
+          </TabsContent>
+
+          <TabsContent value="links" className="mt-4">
+            <AgentLinksTab agentId={agentId} />
           </TabsContent>
         </Tabs>
       </div>

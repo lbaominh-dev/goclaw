@@ -8,11 +8,26 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/config"
 )
 
+// Agent type constants.
+const (
+	AgentTypeOpen       = "open"       // per-user context files, seeded on first chat
+	AgentTypePredefined = "predefined" // shared agent-level context files
+)
+
+// Agent status constants.
+const (
+	AgentStatusActive      = "active"
+	AgentStatusInactive    = "inactive"
+	AgentStatusSummoning   = "summoning"
+	AgentStatusSummonFailed = "summon_failed"
+)
+
 // AgentData represents an agent in the database.
 type AgentData struct {
 	BaseModel
 	AgentKey            string `json:"agent_key"`
 	DisplayName         string `json:"display_name,omitempty"`
+	Frontmatter         string `json:"frontmatter,omitempty"` // short expertise summary (NOT other_config.description which is the summoning prompt)
 	OwnerID             string `json:"owner_id"`
 	Provider            string `json:"provider"`
 	Model               string `json:"model"`

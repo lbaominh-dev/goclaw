@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+
+	"github.com/nextlevelbuilder/goclaw/internal/bootstrap"
 )
 
 // watchDebounce is the delay before re-indexing after file changes.
@@ -165,7 +167,7 @@ func (w *Watcher) handleEvent(ctx context.Context, event fsnotify.Event) {
 	}
 
 	// Only watch MEMORY.md at root or files under memory/ subdirectory
-	if rel != "MEMORY.md" && rel != "memory.md" && !strings.HasPrefix(rel, "memory/") && !strings.HasPrefix(rel, "memory"+string(filepath.Separator)) {
+	if rel != bootstrap.MemoryFile && rel != bootstrap.MemoryAltFile && !strings.HasPrefix(rel, "memory/") && !strings.HasPrefix(rel, "memory"+string(filepath.Separator)) {
 		return
 	}
 

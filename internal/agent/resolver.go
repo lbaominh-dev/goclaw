@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/nextlevelbuilder/goclaw/internal/bootstrap"
@@ -34,6 +35,7 @@ type ResolverDeps struct {
 	// Per-user file seeding + dynamic context loading (managed mode)
 	EnsureUserFiles   EnsureUserFilesFunc
 	ContextFileLoader ContextFileLoaderFunc
+	BootstrapCleanup  BootstrapCleanupFunc
 
 	// Security
 	InjectionAction string // "log", "warn", "block", "off"
@@ -48,6 +50,12 @@ type ResolverDeps struct {
 
 	// Dynamic custom tools (managed mode)
 	DynamicLoader *tools.DynamicToolLoader // nil if not managed
+
+	// Inter-agent delegation (managed mode)
+	AgentLinkStore store.AgentLinkStore // nil if not managed or no links
+
+	// Agent teams (managed mode)
+	TeamStore store.TeamStore // nil if not managed or no teams
 }
 
 // NewManagedResolver creates a ResolverFunc that builds Loops from DB agent data.
@@ -87,6 +95,62 @@ func NewManagedResolver(deps ResolverDeps) ResolverFunc {
 
 		// Load bootstrap files from DB
 		contextFiles := bootstrap.LoadFromStore(ctx, deps.AgentStore, ag.ID)
+
+		// Inject DELEGATION.md from delegation links (only if not already present in DB).
+		// Uses DELEGATION.md (not AGENTS.md) to avoid collision with per-user AGENTS.md
+		// which contains workspace instructions for open agents.
+		if deps.AgentLinkStore != nil {
+			hasDelegationMD := false
+			for _, cf := range contextFiles {
+				if cf.Path == bootstrap.DelegationFile {
+					hasDelegationMD = true
+					break
+				}
+			}
+			if !hasDelegationMD {
+				if allTargets, err := deps.AgentLinkStore.DelegateTargets(ctx, ag.ID); err == nil && len(allTargets) > 0 {
+					// Exclude auto-created team links — team members coordinate via
+					// team_tasks/team_message, not delegate. Only explicitly created
+					// links trigger DELEGATION.md.
+					targets := filterManualLinks(allTargets)
+					if len(targets) > 0 && len(targets) <= 15 {
+						// Static list: all targets directly
+						contextFiles = append(contextFiles, bootstrap.ContextFile{
+							Path:    bootstrap.DelegationFile,
+							Content: buildDelegateAgentsMD(targets),
+						})
+					} else if len(targets) > 15 {
+						// Too many targets: instruct agent to use delegate_search tool
+						contextFiles = append(contextFiles, bootstrap.ContextFile{
+							Path:    bootstrap.DelegationFile,
+							Content: buildDelegateSearchInstruction(len(targets)),
+						})
+					}
+				}
+			}
+		}
+
+		// Inject TEAM.md for all team members (lead + members) so every agent
+		// knows the team workflow: create/claim/complete tasks via team_tasks tool.
+		if deps.TeamStore != nil {
+			hasTeamMD := false
+			for _, cf := range contextFiles {
+				if cf.Path == bootstrap.TeamFile {
+					hasTeamMD = true
+					break
+				}
+			}
+			if !hasTeamMD {
+				if team, err := deps.TeamStore.GetTeamForAgent(ctx, ag.ID); err == nil && team != nil {
+					if members, err := deps.TeamStore.ListMembers(ctx, team.ID); err == nil {
+						contextFiles = append(contextFiles, bootstrap.ContextFile{
+							Path:    bootstrap.TeamFile,
+							Content: buildTeamMD(team, members, ag.ID),
+						})
+					}
+				}
+			}
+		}
 
 		contextWindow := ag.ContextWindow
 		if contextWindow <= 0 {
@@ -165,6 +229,7 @@ func NewManagedResolver(deps ResolverDeps) ResolverFunc {
 			ContextFiles:      contextFiles,
 			EnsureUserFiles:   deps.EnsureUserFiles,
 			ContextFileLoader: deps.ContextFileLoader,
+			BootstrapCleanup:  deps.BootstrapCleanup,
 			OnEvent:           deps.OnEvent,
 			TraceCollector:    deps.TraceCollector,
 			InjectionAction:   deps.InjectionAction,
@@ -197,4 +262,123 @@ func (r *Router) InvalidateAll() {
 	defer r.mu.Unlock()
 	r.agents = make(map[string]*agentEntry)
 	slog.Debug("invalidated all agent caches")
+}
+
+// filterManualLinks removes auto-created team links from delegation targets.
+// Team members coordinate via team_tasks/team_message, not delegate.
+func filterManualLinks(targets []store.AgentLinkData) []store.AgentLinkData {
+	var filtered []store.AgentLinkData
+	for _, t := range targets {
+		if t.TeamID == nil {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
+}
+
+// buildDelegateAgentsMD generates DELEGATION.md content listing available delegation targets.
+func buildDelegateAgentsMD(targets []store.AgentLinkData) string {
+	var sb strings.Builder
+	sb.WriteString("# Agent Delegation\n\n")
+	sb.WriteString("You have the `delegate` tool available. Use it to delegate tasks to other specialized agents.\n")
+	sb.WriteString("The agent list below is complete and authoritative — answer questions about available agents directly from it.\n")
+	sb.WriteString("Only use `delegate` when you need to actually assign work, not to check who is available.\n\n")
+	sb.WriteString("## Available Agents\n")
+
+	for _, t := range targets {
+		sb.WriteString(fmt.Sprintf("\n### %s", t.TargetAgentKey))
+		if t.TargetDisplayName != "" {
+			sb.WriteString(fmt.Sprintf(" (%s)", t.TargetDisplayName))
+		}
+		sb.WriteString("\n")
+		if t.TargetDescription != "" {
+			sb.WriteString(t.TargetDescription + "\n")
+		}
+		sb.WriteString(fmt.Sprintf("→ `delegate(agent=\"%s\", task=\"describe the task\")`\n", t.TargetAgentKey))
+	}
+
+	sb.WriteString("\n## When to Delegate\n\n")
+	sb.WriteString("- The task clearly falls under another agent's expertise\n")
+	sb.WriteString("- You lack the tools or knowledge to handle it well\n")
+	sb.WriteString("- The user explicitly asks to involve another agent\n")
+
+	return sb.String()
+}
+
+// buildDelegateSearchInstruction generates DELEGATION.md content that instructs the agent
+// to use delegate_search tool instead of listing all targets (used when >15 targets).
+func buildDelegateSearchInstruction(targetCount int) string {
+	return fmt.Sprintf(`# Agent Delegation
+
+You have the `+"`delegate`"+` and `+"`delegate_search`"+` tools available.
+Do NOT look for delegation info on disk — it is provided here.
+
+You have access to %d specialized agents. To find the right one:
+
+1. `+"`delegate_search(query=\"your keywords\")`"+` — search agents by expertise
+2. `+"`delegate(agent=\"agent-key\", task=\"describe the task\")`"+` — delegate the task
+
+Example:
+- User asks about billing → `+"`delegate_search(query=\"billing payment\")`"+` → `+"`delegate(agent=\"billing-agent\", task=\"...\")`"+`
+
+Do NOT guess agent keys. Always search first.
+`, targetCount)
+}
+
+// buildTeamMD generates compact TEAM.md content for an agent that is part of a team.
+// Kept minimal — tool descriptions already live in tool Parameters()/Description().
+func buildTeamMD(team *store.TeamData, members []store.TeamMemberData, selfID uuid.UUID) string {
+	var sb strings.Builder
+	sb.WriteString("# Team: " + team.Name + "\n")
+	if team.Description != "" {
+		sb.WriteString(team.Description + "\n")
+	}
+
+	// Determine self role
+	selfRole := store.TeamRoleMember
+	for _, m := range members {
+		if m.AgentID == selfID {
+			selfRole = m.Role
+			break
+		}
+	}
+	sb.WriteString(fmt.Sprintf("Role: %s\n\n", selfRole))
+
+	// Members (including self)
+	sb.WriteString("## Members\n")
+	sb.WriteString("This is the complete and authoritative list of your team. Do NOT use tools to verify this.\n\n")
+	for _, m := range members {
+		if m.AgentID == selfID {
+			sb.WriteString(fmt.Sprintf("- **you** (%s)", m.Role))
+		} else {
+			sb.WriteString(fmt.Sprintf("- **%s** (%s)", m.AgentKey, m.Role))
+		}
+		if m.Frontmatter != "" {
+			sb.WriteString(": " + m.Frontmatter)
+		}
+		sb.WriteString("\n")
+	}
+
+	// Workflow guidance
+	sb.WriteString("\n## Workflow\n\n")
+	if selfRole == store.TeamRoleLead {
+		sb.WriteString("**MANDATORY**: ALWAYS use `team_tasks` to track work. NEVER call `delegate` without a task.\n\n")
+		sb.WriteString("Every delegation MUST follow these 2 steps:\n")
+		sb.WriteString("1. `team_tasks` action=create, subject=<brief title> → returns task_id\n")
+		sb.WriteString("2. `delegate` agent=<member>, task=<instructions>, team_task_id=<the task_id from step 1>\n\n")
+		sb.WriteString("The task auto-completes when delegation finishes. This ensures all work is tracked.\n\n")
+		sb.WriteString("Other `team_tasks` actions:\n")
+		sb.WriteString("- action=list → view all team tasks and their status\n")
+		sb.WriteString("- action=complete, task_id=<id>, result=<summary> → manually complete a task\n\n")
+		sb.WriteString("Use `team_message` to send updates to team members.\n\n")
+		sb.WriteString("For simple questions about team composition, answer directly from the member list above.\n")
+	} else {
+		sb.WriteString("As a member, when you receive a delegated task, just do the work.\n")
+		sb.WriteString("Task completion is handled automatically by the system.\n\n")
+		sb.WriteString("You can use `team_tasks` action=list to check the team's task board.\n")
+		sb.WriteString("Use `team_message` to send updates to your team lead.\n\n")
+		sb.WriteString("For simple questions about team composition, answer directly from the member list above.\n")
+	}
+
+	return sb.String()
 }

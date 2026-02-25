@@ -56,6 +56,9 @@ const CustomToolsPage = lazy(() =>
 const MCPPage = lazy(() =>
   import("@/pages/mcp/mcp-page").then((m) => ({ default: m.MCPPage })),
 );
+const TeamsPage = lazy(() =>
+  import("@/pages/teams/teams-page").then((m) => ({ default: m.TeamsPage })),
+);
 const TtsPage = lazy(() =>
   import("@/pages/tts/tts-page").then((m) => ({ default: m.TtsPage })),
 );
@@ -87,6 +90,8 @@ export function AppRoutes() {
           <Route path={ROUTES.CHAT_SESSION} element={<ChatPage />} />
           <Route path={ROUTES.AGENTS} element={<AgentsPage key="list" />} />
           <Route path={ROUTES.AGENT_DETAIL} element={<AgentsPage key="detail" />} />
+          <Route path={ROUTES.TEAMS} element={<TeamsPage key="list" />} />
+          <Route path={ROUTES.TEAM_DETAIL} element={<TeamsPage key="detail" />} />
           <Route path={ROUTES.SESSIONS} element={<SessionsPage key="list" />} />
           <Route path={ROUTES.SESSION_DETAIL} element={<SessionsPage key="detail" />} />
           <Route path={ROUTES.SKILLS} element={<SkillsPage key="list" />} />

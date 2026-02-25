@@ -117,6 +117,19 @@ export const Methods = {
 
   SEND: "send",
 
+  // Agent links (delegation)
+  AGENTS_LINKS_LIST: "agents.links.list",
+  AGENTS_LINKS_CREATE: "agents.links.create",
+  AGENTS_LINKS_UPDATE: "agents.links.update",
+  AGENTS_LINKS_DELETE: "agents.links.delete",
+
+  // Agent teams (managed mode)
+  TEAMS_LIST: "teams.list",
+  TEAMS_CREATE: "teams.create",
+  TEAMS_GET: "teams.get",
+  TEAMS_DELETE: "teams.delete",
+  TEAMS_TASK_LIST: "teams.tasks.list",
+
   // Phase 3+ - NICE TO HAVE
   LOGS_TAIL: "logs.tail",
   HEARTBEAT: "heartbeat",

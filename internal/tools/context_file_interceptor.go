@@ -18,22 +18,22 @@ import (
 // protectedFileSet defines files that require group file writer permission in group chats.
 // These files control the agent's identity and behavior — only allowlisted users can modify them.
 var protectedFileSet = map[string]bool{
-	"SOUL.md":      true,
-	"IDENTITY.md":  true,
-	"AGENTS.md":    true,
-	"HEARTBEAT.md": true,
-	"USER.md":      true,
+	bootstrap.SoulFile:      true,
+	bootstrap.IdentityFile:  true,
+	bootstrap.AgentsFile:    true,
+	bootstrap.HeartbeatFile: true,
+	bootstrap.UserFile:      true,
 }
 
 // contextFileSet is the set of filenames routed to DB in managed mode.
 var contextFileSet = map[string]bool{
-	"SOUL.md":      true,
-	"AGENTS.md":    true,
-	"TOOLS.md":     true,
-	"IDENTITY.md":  true,
-	"HEARTBEAT.md": true,
-	"USER.md":      true,
-	"BOOTSTRAP.md": true, // first-run file (deleted after completion)
+	bootstrap.SoulFile:      true,
+	bootstrap.AgentsFile:    true,
+	bootstrap.ToolsFile:     true,
+	bootstrap.IdentityFile:  true,
+	bootstrap.HeartbeatFile: true,
+	bootstrap.UserFile:      true,
+	bootstrap.BootstrapFile: true, // first-run file (deleted after completion)
 }
 
 // isContextFile checks if a path refers to a workspace-root context file.
@@ -123,7 +123,7 @@ func (b *ContextFileInterceptor) ReadFile(ctx context.Context, path string) (str
 	agentType := store.AgentTypeFromContext(ctx)
 
 	// Open agent: ALL files per-user → fallback to agent-level
-	if agentType == "open" && userID != "" {
+	if agentType == store.AgentTypeOpen && userID != "" {
 		content, handled, err := b.readUserFile(ctx, agentID, userID, fileName)
 		if err != nil {
 			return "", handled, err
@@ -136,7 +136,7 @@ func (b *ContextFileInterceptor) ReadFile(ctx context.Context, path string) (str
 	}
 
 	// Predefined agent: USER.md and BOOTSTRAP.md per-user
-	if agentType == "predefined" && userID != "" && (fileName == "USER.md" || fileName == "BOOTSTRAP.md") {
+	if agentType == store.AgentTypePredefined && userID != "" && (fileName == bootstrap.UserFile || fileName == bootstrap.BootstrapFile) {
 		content, handled, err := b.readUserFile(ctx, agentID, userID, fileName)
 		if err != nil {
 			return "", handled, err
@@ -254,7 +254,7 @@ func (b *ContextFileInterceptor) WriteFile(ctx context.Context, path, content st
 	// USER.md writes are allowed so the bot can complete the first-run ritual.
 	if strings.HasPrefix(userID, "group:") && protectedFileSet[fileName] {
 		skipCheck := false
-		if fileName == "USER.md" && b.hasBootstrapFile(ctx, agentID, userID) {
+		if fileName == bootstrap.UserFile && b.hasBootstrapFile(ctx, agentID, userID) {
 			skipCheck = true // onboarding in progress — allow USER.md write
 		}
 		if !skipCheck {
@@ -277,7 +277,7 @@ func (b *ContextFileInterceptor) WriteFile(ctx context.Context, path, content st
 	// BOOTSTRAP.md deletion: empty content = first-run completed → delete row.
 	// Must come BEFORE the predefined write block so bootstrap completion works
 	// for both open and predefined agents.
-	if fileName == "BOOTSTRAP.md" && content == "" && userID != "" {
+	if fileName == bootstrap.BootstrapFile && content == "" && userID != "" {
 		err := b.agentStore.DeleteUserContextFile(ctx, agentID, userID, fileName)
 		if err == nil {
 			b.invalidateUser(agentID, userID)
@@ -287,7 +287,7 @@ func (b *ContextFileInterceptor) WriteFile(ctx context.Context, path, content st
 
 	// Predefined agent: block writes to shared files (only USER.md allowed per-user).
 	// This prevents any user from modifying the agent's identity/behavior via chat.
-	if agentType == "predefined" && fileName != "USER.md" {
+	if agentType == store.AgentTypePredefined && fileName != bootstrap.UserFile {
 		return true, fmt.Errorf(
 			"this file (%s) is part of the agent's predefined configuration and cannot be modified through chat. "+
 				"Only the agent owner can edit it from the management dashboard.",
@@ -296,7 +296,7 @@ func (b *ContextFileInterceptor) WriteFile(ctx context.Context, path, content st
 	}
 
 	// Open agent: all files per-user
-	if agentType == "open" && userID != "" {
+	if agentType == store.AgentTypeOpen && userID != "" {
 		err := b.agentStore.SetUserContextFile(ctx, agentID, userID, fileName, content)
 		if err == nil {
 			b.invalidateUser(agentID, userID)
@@ -305,7 +305,7 @@ func (b *ContextFileInterceptor) WriteFile(ctx context.Context, path, content st
 	}
 
 	// Predefined agent: only USER.md per-user
-	if agentType == "predefined" && userID != "" && fileName == "USER.md" {
+	if agentType == store.AgentTypePredefined && userID != "" && fileName == bootstrap.UserFile {
 		err := b.agentStore.SetUserContextFile(ctx, agentID, userID, fileName, content)
 		if err == nil {
 			b.invalidateUser(agentID, userID)
@@ -325,7 +325,7 @@ func (b *ContextFileInterceptor) WriteFile(ctx context.Context, path, content st
 // Used by the agent loop to dynamically resolve context files for system prompt.
 func (b *ContextFileInterceptor) LoadContextFiles(ctx context.Context, agentID uuid.UUID, userID, agentType string) []bootstrap.ContextFile {
 	// Open agent: all files from user_context_files
-	if agentType == "open" && userID != "" {
+	if agentType == store.AgentTypeOpen && userID != "" {
 		files, err := b.agentStore.GetUserContextFiles(ctx, agentID, userID)
 		if err != nil {
 			return nil
@@ -347,7 +347,7 @@ func (b *ContextFileInterceptor) LoadContextFiles(ctx context.Context, agentID u
 	}
 
 	// Predefined agent: agent files + override USER.md from user
-	if agentType == "predefined" && userID != "" {
+	if agentType == store.AgentTypePredefined && userID != "" {
 		agentFiles, err := b.agentStore.GetAgentContextFiles(ctx, agentID)
 		if err != nil {
 			return nil
@@ -440,7 +440,7 @@ func (b *ContextFileInterceptor) InvalidateAll() {
 // indicating the user is still in onboarding. Used to exempt USER.md writes
 // from group permission checks during the first-run ritual.
 func (b *ContextFileInterceptor) hasBootstrapFile(ctx context.Context, agentID uuid.UUID, userID string) bool {
-	content, _, err := b.readUserFile(ctx, agentID, userID, "BOOTSTRAP.md")
+	content, _, err := b.readUserFile(ctx, agentID, userID, bootstrap.BootstrapFile)
 	return err == nil && content != ""
 }
 

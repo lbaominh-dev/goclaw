@@ -41,9 +41,10 @@ interface TraceDetailDialogProps {
   traceId: string;
   onClose: () => void;
   getTrace: (id: string) => Promise<{ trace: TraceData; spans: SpanData[] } | null>;
+  onNavigateTrace?: (traceId: string) => void;
 }
 
-export function TraceDetailDialog({ traceId, onClose, getTrace }: TraceDetailDialogProps) {
+export function TraceDetailDialog({ traceId, onClose, getTrace, onNavigateTrace }: TraceDetailDialogProps) {
   const [trace, setTrace] = useState<TraceData | null>(null);
   const [spans, setSpans] = useState<SpanData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -107,6 +108,18 @@ export function TraceDetailDialog({ traceId, onClose, getTrace }: TraceDetailDia
                 <span className="text-muted-foreground">Started:</span>{" "}
                 {formatDate(trace.start_time)}
               </div>
+              {trace.parent_trace_id && (
+                <div>
+                  <span className="text-muted-foreground">Delegated from:</span>{" "}
+                  <button
+                    type="button"
+                    className="cursor-pointer font-mono text-xs text-primary hover:underline"
+                    onClick={() => onNavigateTrace?.(trace.parent_trace_id!)}
+                  >
+                    {trace.parent_trace_id.slice(0, 8)}...
+                  </button>
+                </div>
+              )}
             </div>
 
             {trace.input_preview && (
@@ -164,7 +177,7 @@ function SpanTreeNode({ node, depth }: { node: SpanNode; depth: number }) {
           {hasChildren ? (
             <button
               type="button"
-              className="flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-muted"
+              className="flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded hover:bg-muted"
               onClick={() => setExpanded(!expanded)}
             >
               {expanded ? (
@@ -180,7 +193,7 @@ function SpanTreeNode({ node, depth }: { node: SpanNode; depth: number }) {
           {/* Span info row - clickable for detail */}
           <button
             type="button"
-            className="flex flex-1 items-center gap-2 text-left hover:opacity-80"
+            className="flex flex-1 cursor-pointer items-center gap-2 text-left hover:opacity-80"
             onClick={() => setDetailOpen(!detailOpen)}
           >
             <Badge variant="outline" className="shrink-0 text-xs">

@@ -107,6 +107,7 @@ func createAgentLoop(agentID string, cfg *config.Config, router *agent.Router, p
 		ContextFiles:      contextFiles,
 		EnsureUserFiles:   ensureUserFiles,
 		ContextFileLoader: contextFileLoader,
+		BootstrapCleanup:  buildBootstrapCleanup(agentStore),
 		CompactionCfg:      cfg.Agents.Defaults.Compaction,
 		ContextPruningCfg:  cfg.Agents.Defaults.ContextPruning,
 		SandboxEnabled:         sandboxEnabled,

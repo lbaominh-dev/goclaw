@@ -17,17 +17,31 @@ import (
 	"github.com/nextlevelbuilder/goclaw/pkg/protocol"
 )
 
+// Summoning event type constants.
+const (
+	SummonEventStarted       = "started"
+	SummonEventFailed        = "failed"
+	SummonEventCompleted     = "completed"
+	SummonEventFileGenerated = "file_generated"
+)
+
+// frontmatterKey is the special key used to store frontmatter in the parsed file map.
+const frontmatterKey = "__frontmatter__"
+
 // summoningFiles is the ordered list of context files the LLM should generate.
 var summoningFiles = []string{
-	"SOUL.md",
-	"IDENTITY.md",
-	"AGENTS.md",
-	"TOOLS.md",
-	"HEARTBEAT.md",
+	bootstrap.SoulFile,
+	bootstrap.IdentityFile,
+	bootstrap.AgentsFile,
+	bootstrap.ToolsFile,
+	bootstrap.HeartbeatFile,
 }
 
 // fileTagRe parses <file name="SOUL.md">content</file> from LLM output.
 var fileTagRe = regexp.MustCompile(`(?s)<file\s+name="([^"]+)">\s*(.*?)\s*</file>`)
+
+// frontmatterTagRe parses <frontmatter>short expertise summary</frontmatter> from LLM output.
+var frontmatterTagRe = regexp.MustCompile(`(?s)<frontmatter>\s*(.*?)\s*</frontmatter>`)
 
 // AgentSummoner generates context files for predefined agents using an LLM.
 // Runs one-shot background calls — no session data, no agent loop.
@@ -49,26 +63,34 @@ func NewAgentSummoner(agents store.AgentStore, providerReg *providers.Registry, 
 // SummonAgent generates context files from a natural language description.
 // Meant to be called as a goroutine: go summoner.SummonAgent(...)
 // On success: stores generated files and sets agent status to "active".
-// On failure: keeps template files (already seeded) and sets status to "summon_failed".
+// On failure: keeps template files (already seeded) and sets status to store.AgentStatusSummonFailed.
 func (s *AgentSummoner) SummonAgent(agentID uuid.UUID, providerName, model, description string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
-	s.emitEvent(agentID, "started", "", "")
+	s.emitEvent(agentID, SummonEventStarted, "", "")
 
 	files, err := s.generateFiles(ctx, providerName, model, s.buildCreatePrompt(description))
 	if err != nil {
 		slog.Warn("summoning: LLM generation failed, falling back to templates",
 			"agent", agentID, "error", err)
-		s.emitEvent(agentID, "failed", "", err.Error())
+		s.emitEvent(agentID, SummonEventFailed, "", err.Error())
 		// Use fresh context — the original may have timed out, but we still need to update status.
-		s.setAgentStatus(context.Background(), agentID, "summon_failed")
+		s.setAgentStatus(context.Background(), agentID, store.AgentStatusSummonFailed)
 		return
 	}
 
 	s.storeFiles(ctx, agentID, files)
-	s.setAgentStatus(ctx, agentID, "active")
-	s.emitEvent(agentID, "completed", "", "")
+
+	// Auto-generate frontmatter from description if LLM included it
+	if fm, ok := files[frontmatterKey]; ok && fm != "" {
+		if err := s.agents.Update(ctx, agentID, map[string]any{"frontmatter": fm}); err != nil {
+			slog.Warn("summoning: failed to save frontmatter", "agent", agentID, "error", err)
+		}
+	}
+
+	s.setAgentStatus(ctx, agentID, store.AgentStatusActive)
+	s.emitEvent(agentID, SummonEventCompleted, "", "")
 
 	slog.Info("summoning: completed", "agent", agentID, "files", len(files))
 }
@@ -80,14 +102,14 @@ func (s *AgentSummoner) RegenerateAgent(agentID uuid.UUID, providerName, model, 
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
-	s.emitEvent(agentID, "started", "", "")
+	s.emitEvent(agentID, SummonEventStarted, "", "")
 
 	// Read existing files for context
 	existing, err := s.agents.GetAgentContextFiles(ctx, agentID)
 	if err != nil {
 		slog.Warn("summoning: failed to read existing files", "agent", agentID, "error", err)
-		s.emitEvent(agentID, "failed", "", err.Error())
-		s.setAgentStatus(context.Background(), agentID, "summon_failed")
+		s.emitEvent(agentID, SummonEventFailed, "", err.Error())
+		s.setAgentStatus(context.Background(), agentID, store.AgentStatusSummonFailed)
 		return
 	}
 
@@ -96,15 +118,15 @@ func (s *AgentSummoner) RegenerateAgent(agentID uuid.UUID, providerName, model, 
 	files, err := s.generateFiles(ctx, providerName, model, prompt)
 	if err != nil {
 		slog.Warn("summoning: regeneration failed", "agent", agentID, "error", err)
-		s.emitEvent(agentID, "failed", "", err.Error())
+		s.emitEvent(agentID, SummonEventFailed, "", err.Error())
 		// Use fresh context — the original may have timed out, but we still need to update status.
-		s.setAgentStatus(context.Background(), agentID, "summon_failed")
+		s.setAgentStatus(context.Background(), agentID, store.AgentStatusSummonFailed)
 		return
 	}
 
 	s.storeFiles(ctx, agentID, files)
-	s.setAgentStatus(ctx, agentID, "active")
-	s.emitEvent(agentID, "completed", "", "")
+	s.setAgentStatus(ctx, agentID, store.AgentStatusActive)
+	s.emitEvent(agentID, SummonEventCompleted, "", "")
 
 	slog.Info("summoning: regeneration completed", "agent", agentID, "files", len(files))
 }
@@ -149,7 +171,7 @@ func (s *AgentSummoner) storeFiles(ctx context.Context, agentID uuid.UUID, files
 			slog.Warn("summoning: failed to store file", "agent", agentID, "file", name, "error", err)
 			continue
 		}
-		s.emitEvent(agentID, "file_generated", name, "")
+		s.emitEvent(agentID, SummonEventFileGenerated, name, "")
 	}
 }
 
@@ -239,7 +261,13 @@ Instructions for each file:
 - **TOOLS.md**: Customize with tool notes relevant to this agent's role. Keep the structure.
 - **HEARTBEAT.md**: Add periodic tasks if relevant to the agent's role. Leave minimal if not applicable.
 
-Generate each file inside XML tags:
+First, generate a short expertise summary (1-2 sentences, under 200 characters) describing what this agent specializes in. This is used for delegation discovery — other agents use it to decide whether to delegate tasks here.
+
+<frontmatter>
+(short expertise summary here)
+</frontmatter>
+
+Then generate each file inside XML tags:
 
 <file name="SOUL.md">
 (generate here)
@@ -279,7 +307,8 @@ func (s *AgentSummoner) buildEditPrompt(existing []store.AgentContextFileData, e
 	return sb.String()
 }
 
-// parseFileResponse extracts file contents from XML-tagged LLM output.
+// parseFileResponse extracts file contents and frontmatter from XML-tagged LLM output.
+// Frontmatter is stored under the special key "__frontmatter__".
 func parseFileResponse(content string) map[string]string {
 	files := make(map[string]string)
 	matches := fileTagRe.FindAllStringSubmatch(content, -1)
@@ -288,6 +317,12 @@ func parseFileResponse(content string) map[string]string {
 		body := strings.TrimSpace(m[2])
 		if name != "" && body != "" {
 			files[name] = body
+		}
+	}
+	// Extract frontmatter tag if present
+	if fm := frontmatterTagRe.FindStringSubmatch(content); len(fm) > 1 {
+		if trimmed := strings.TrimSpace(fm[1]); trimmed != "" {
+			files[frontmatterKey] = trimmed
 		}
 	}
 	return files

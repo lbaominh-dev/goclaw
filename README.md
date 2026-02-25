@@ -33,7 +33,7 @@ GoClaw is OpenClaw, reimagined in Go. It preserves the powerful gateway architec
 
 ### Parallel Execution
 
-- **Lane-based scheduler** — Main / subagent / cron lane isolation
+- **Lane-based scheduler** — Main / subagent / delegate / cron lane isolation (env-configurable concurrency)
 - **Concurrent agent runs** — Multiple users in a group chat get parallel responses (configurable `maxConcurrent`, default 3 for groups). Adaptive throttle reduces concurrency when session history nears summarization threshold
 - **Session history isolation** — Concurrent runs buffer messages locally and flush atomically on completion, preventing cross-run context pollution
 - **Concurrent subagents** — Depth limits, count limits, model override
@@ -98,6 +98,7 @@ Standalone mode shares everything across users (same as OpenClaw). Managed mode 
 - **Multi-provider LLM support** — OpenRouter, Anthropic, OpenAI, Groq, DeepSeek, Gemini, Mistral, xAI, MiniMax, Cohere, Perplexity, and any OpenAI-compatible endpoint
 - **Agent loop** — Think-act-observe cycle with tool use, session history, and auto-summarization
 - **Subagents** — Spawn child agents with different models for parallel task execution
+- **Agent delegation** — Delegate tasks between named agents with permission-controlled links, sync/async modes, concurrency limits, per-user restrictions, and hybrid FTS + semantic agent discovery (managed mode)
 - **Messaging channels** — Telegram, Discord, Zalo, Feishu/Lark, WhatsApp. `/stop` cancels the current task, `/stopall` cancels all running tasks in a chat
 - **Memory system** — Long-term memory with SQLite FTS5 + vector embeddings (standalone) or pgvector hybrid search (managed)
 - **Skills** — SKILL.md-based knowledge base with BM25 search + embedding hybrid search (managed mode)
@@ -268,6 +269,15 @@ When `GOCLAW_*_API_KEY` environment variables are set, the gateway automatically
 | `GOCLAW_FEISHU_APP_SECRET`         | Feishu/Lark app secret        |
 | `GOCLAW_FEISHU_ENCRYPT_KEY`        | Feishu message encryption key |
 | `GOCLAW_FEISHU_VERIFICATION_TOKEN` | Feishu verification token     |
+
+**Scheduler Lanes:**
+
+| Variable               | Description                  | Default |
+| ---------------------- | ---------------------------- | ------- |
+| `GOCLAW_LANE_MAIN`     | Main lane concurrency        | `30`    |
+| `GOCLAW_LANE_SUBAGENT` | Subagent lane concurrency    | `50`    |
+| `GOCLAW_LANE_DELEGATE` | Delegation lane concurrency  | `100`   |
+| `GOCLAW_LANE_CRON`     | Cron lane concurrency        | `30`    |
 
 **Tailscale (requires build tag `tsnet`):**
 
@@ -492,7 +502,7 @@ POSTGRES_DB=goclaw
 |  +-----------------------------------------------------+  |
 |  |              Tool Registry                           |  |
 |  | read_file|write_file|exec|web_search|web_fetch|...   |  |
-|  | memory|skill_search|tts|spawn|browser|...            |  |
+|  | memory|skill_search|tts|spawn|browser|delegate|...   |  |
 |  | custom tools (runtime) | MCP bridge (stdio/SSE/HTTP) |  |
 |  +-----------------------------------------------------+  |
 |                       v                                     |
@@ -530,6 +540,8 @@ POSTGRES_DB=goclaw
 | `tts`              | —          | Text-to-Speech synthesis                                     |
 | `spawn`            | —          | Spawn a subagent                                             |
 | `subagents`        | sessions   | Control running subagents                                    |
+| `delegate`         | —          | Delegate tasks to other agents (sync/async, cancel, list)    |
+| `delegate_search`  | —          | Search delegation targets (hybrid FTS + semantic)            |
 | `sessions_list`    | sessions   | List active sessions                                         |
 | `sessions_history` | sessions   | View session history                                         |
 | `sessions_send`    | sessions   | Send message to a session                                    |
@@ -539,6 +551,176 @@ POSTGRES_DB=goclaw
 | `gateway`          | automation | Gateway administration                                       |
 | `browser`          | ui         | Browser automation (navigate, click, type, screenshot)       |
 | `canvas`           | ui         | Visual canvas for diagrams                                   |
+
+## Agent Delegation (Managed Mode)
+
+Agent delegation enables named agents to delegate tasks to other agents — each running with its own identity, tools, LLM provider, and context files. Unlike subagents (anonymous clones of the parent), delegation targets are fully independent agents with their own expertise.
+
+### How Agents Collaborate
+
+```mermaid
+flowchart TD
+    USER((👤 User)) -->|"Research competitor pricing"| SUPPORT
+
+    subgraph TEAM["🤖 Agent Team"]
+        SUPPORT["💬 Support Bot\n(Claude Haiku)"]
+        RESEARCH["🔍 Research Bot\n(GPT-4)"]
+        WRITER["✍️ Content Writer\n(Claude Sonnet)"]
+        BILLING["💳 Billing Bot\n(Gemini)"]
+    end
+
+    SUPPORT -->|"🔄 sync: wait for answer"| RESEARCH
+    RESEARCH -->|"📋 result"| SUPPORT
+    SUPPORT -->|"⚡ async: don't wait"| WRITER
+    WRITER -.->|"📣 announce when done"| SUPPORT
+    SUPPORT -.-x|"🚫 no link"| BILLING
+
+    SUPPORT -->|"✅ final answer"| USER
+
+    style USER fill:#e1f5fe
+    style SUPPORT fill:#fff3e0
+    style RESEARCH fill:#e8f5e9
+    style WRITER fill:#f3e5f5
+    style BILLING fill:#ffebee
+```
+
+| Mode | How it works | Best for |
+|------|-------------|----------|
+| **Sync** | Agent A asks Agent B and **waits** for the answer | Quick lookups, fact checks |
+| **Async** | Agent A asks Agent B and **moves on**. B announces the result later | Long tasks, reports, deep analysis |
+
+### Architecture
+
+```mermaid
+flowchart TD
+    U[User] -->|chat| A[Agent A<br/>Customer Support<br/>Claude Haiku]
+
+    subgraph Delegation["Inter-Agent Delegation"]
+        A -->|"delegate(sync)"| B[Agent B<br/>Research Bot<br/>GPT-4]
+        A -->|"delegate(async)"| C[Agent C<br/>Content Writer<br/>Claude Sonnet]
+        B -->|result| A
+        C -->|announce via Message Bus| A
+    end
+
+    subgraph Permission["Permission Layer"]
+        LINKS[(agent_links<br/>direction · max_concurrent<br/>settings JSONB)]
+        LINKS -->|outbound| B
+        LINKS -->|bidirectional| C
+    end
+
+    subgraph Search["Agent Discovery"]
+        FTS[FTS<br/>tsvector on agents]
+        VEC[Semantic<br/>pgvector embeddings]
+        FTS & VEC -->|hybrid 0.3 + 0.7| RESULTS[delegate_search tool]
+    end
+
+    A -.->|"≤15 targets"| AGENTSMD["AGENTS.md<br/>(auto-injected)"]
+    A -.->|">15 targets"| RESULTS
+```
+
+### Permission Links
+
+Agents communicate through explicit **agent links** — directed edges with access control:
+
+```bash
+# Create a one-way link: support-bot can delegate TO research-bot
+agents.links.create {
+  "sourceAgent": "support-bot",
+  "targetAgent": "research-bot",
+  "direction": "outbound",
+  "description": "Allow support to request research",
+  "maxConcurrent": 3
+}
+
+# Bidirectional: both agents can delegate to each other
+agents.links.create {
+  "sourceAgent": "support-bot",
+  "targetAgent": "content-writer",
+  "direction": "bidirectional"
+}
+```
+
+| Direction | Meaning |
+|-----------|---------|
+| `outbound` | Source can delegate TO target |
+| `inbound` | Target can delegate TO source |
+| `bidirectional` | Both agents can delegate to each other |
+
+### Delegation Modes
+
+**Sync** (default) — Agent A blocks while B processes:
+
+```
+delegate(agent="research-bot", task="Find competitor pricing for X")
+→ research-bot runs full agent loop (own tools, identity, provider)
+→ result returned inline to agent A
+```
+
+**Async** — Agent A continues immediately, result announced later:
+
+```
+delegate(agent="research-bot", task="Deep market analysis", mode="async")
+→ returns immediately with delegation ID
+→ research-bot runs in background via "delegate" scheduler lane
+→ result announced back through message bus → A reformulates for user
+```
+
+**Cancel & List:**
+
+```
+delegate(action="cancel", delegation_id="abc123")
+delegate(action="list")
+```
+
+### Concurrency Control
+
+Two layers prevent any agent from being overwhelmed:
+
+| Layer | Config | Example |
+|-------|--------|---------|
+| **Per-link** | `agent_links.max_concurrent` | support → research: max 3 |
+| **Per-agent** | `agents.other_config.max_delegation_load` | research-bot: max 5 total |
+
+When limits are hit, the delegate tool returns a descriptive error so the LLM can adapt (retry later, use a different agent, or handle the task itself).
+
+### Per-User Restrictions
+
+The `settings` JSONB on agent links supports per-user access control:
+
+```json
+{
+  "user_deny": ["free-tier-user"],
+  "user_allow": ["premium-user-1", "premium-user-2"]
+}
+```
+
+Empty settings = all users allowed (default). Deny list is checked first, then allow list.
+
+### Agent Discovery
+
+Each agent has a `frontmatter` field — a short expertise summary used for discovery:
+
+- **≤15 delegation targets**: Auto-generated `AGENTS.md` is injected into the agent's context, listing all available targets with usage instructions
+- **>15 targets**: Agent is instructed to use the `delegate_search` tool for hybrid FTS + semantic search (BM25 weight 0.3 + pgvector cosine weight 0.7)
+
+```
+delegate_search(query="billing payment refund")
+→ returns ranked list of matching agents with frontmatter
+→ agent picks the best match and delegates
+```
+
+### Key Differences from Subagents
+
+| Aspect | Subagents | Agent Delegation |
+|--------|-----------|-----------------|
+| Target | Anonymous clone of parent | Named agent with own identity |
+| Provider/Model | Inherited from parent | Target's own configuration |
+| Tools | Parent's tools minus deny list | Target's own tool registry + policy |
+| Context files | Simplified system prompt | Target's own SOUL.md, IDENTITY.md, etc. |
+| Session | Shared with parent | Isolated (fresh per delegation) |
+| Permission | Depth-based limits only | Explicit `agent_links` with direction |
+| User control | None | Per-user deny/allow via settings JSONB |
+| Concurrency | Global + per-parent limits | Per-link + per-target-agent limits |
 
 ## Browser Pairing
 
@@ -638,12 +820,13 @@ GOCLAW_OPENROUTER_API_KEY=sk-or-xxx go test -v ./tests/integration/ -timeout 120
 - **WebSocket RPC protocol (v3)** — Connect handshake, chat streaming, event push all tested with web dashboard and integration tests.
 - **Store layer (PostgreSQL)** — All PG stores (sessions, agents, providers, skills, cron, pairing, tracing, memory) implemented and running in managed mode.
 - **Browser automation** — Rod/CDP integration for headless Chrome, tested in production agent workflows.
-- **Lane-based scheduler** — Main/subagent/cron lane isolation with concurrent execution tested. Group chats support up to 3 concurrent agent runs per session with adaptive throttle and deferred session writes for history isolation.
+- **Lane-based scheduler** — Main/subagent/delegate/cron lane isolation with concurrent execution tested. Group chats support up to 3 concurrent agent runs per session with adaptive throttle and deferred session writes for history isolation.
 - **Security hardening** — Rate limiting, prompt injection detection, CORS, shell deny patterns, SSRF protection, credential scrubbing all implemented and verified.
 - **Web dashboard (core)** — Channel management, agent management, pairing approval, traces & spans viewer all implemented and working well.
 
 ### Implemented but Not Fully Tested
 
+- **Agent delegation** — Inter-agent task delegation with permission links, sync/async modes, per-user restrictions, concurrency limits, and hybrid agent search. Core implementation complete, needs E2E testing with real multi-agent workflows.
 - **Other messaging channels** — Discord, Zalo, Feishu/Lark, WhatsApp channel adapters are implemented but have not been tested end-to-end in production. Only Telegram has been validated with real users.
 - **Skill system** — BM25 search, ZIP upload, SKILL.md parsing, and embedding hybrid search are implemented. Basic functionality verified but no full E2E flow testing with real agent usage.
 - **Custom tools (runtime API)** — Shell-based custom tools with JSON Schema params, encrypted env vars, and HTTP CRUD are implemented. Not yet tested in a production workflow.

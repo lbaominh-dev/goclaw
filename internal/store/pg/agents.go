@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,15 +14,92 @@ import (
 
 // PGAgentStore implements store.AgentStore backed by Postgres.
 type PGAgentStore struct {
-	db *sql.DB
+	db          *sql.DB
+	embProvider store.EmbeddingProvider // optional: for agent frontmatter embeddings
 }
 
 func NewPGAgentStore(db *sql.DB) *PGAgentStore {
 	return &PGAgentStore{db: db}
 }
 
+// SetEmbeddingProvider sets the embedding provider for agent frontmatter vectors.
+func (s *PGAgentStore) SetEmbeddingProvider(provider store.EmbeddingProvider) {
+	s.embProvider = provider
+}
+
+// generateAgentEmbedding creates an embedding for an agent's displayName+frontmatter and stores it.
+func (s *PGAgentStore) generateAgentEmbedding(ctx context.Context, agentID uuid.UUID, displayName, frontmatter string) {
+	if s.embProvider == nil || frontmatter == "" {
+		return
+	}
+	text := displayName
+	if frontmatter != "" {
+		text += ": " + frontmatter
+	}
+	embeddings, err := s.embProvider.Embed(ctx, []string{text})
+	if err != nil || len(embeddings) == 0 || len(embeddings[0]) == 0 {
+		slog.Warn("agent embedding generation failed", "agent", agentID, "error", err)
+		return
+	}
+	vecStr := vectorToString(embeddings[0])
+	if _, err := s.db.ExecContext(ctx, `UPDATE agents SET embedding = $1::vector WHERE id = $2`, vecStr, agentID); err != nil {
+		slog.Warn("agent embedding update failed", "agent", agentID, "error", err)
+	}
+}
+
+// BackfillAgentEmbeddings generates embeddings for all active agents that have frontmatter but no embedding.
+func (s *PGAgentStore) BackfillAgentEmbeddings(ctx context.Context) (int, error) {
+	if s.embProvider == nil {
+		return 0, nil
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, COALESCE(display_name, ''), COALESCE(frontmatter, '')
+		 FROM agents WHERE deleted_at IS NULL AND frontmatter IS NOT NULL AND frontmatter != '' AND embedding IS NULL`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	type agentRow struct {
+		id          uuid.UUID
+		displayName string
+		frontmatter string
+	}
+	var pending []agentRow
+	for rows.Next() {
+		var r agentRow
+		if err := rows.Scan(&r.id, &r.displayName, &r.frontmatter); err != nil {
+			continue
+		}
+		pending = append(pending, r)
+	}
+	if len(pending) == 0 {
+		return 0, nil
+	}
+
+	slog.Info("backfilling agent embeddings", "count", len(pending))
+	updated := 0
+	for _, ag := range pending {
+		text := ag.displayName
+		if ag.frontmatter != "" {
+			text += ": " + ag.frontmatter
+		}
+		embeddings, err := s.embProvider.Embed(ctx, []string{text})
+		if err != nil || len(embeddings) == 0 || len(embeddings[0]) == 0 {
+			continue
+		}
+		vecStr := vectorToString(embeddings[0])
+		if _, err := s.db.ExecContext(ctx, `UPDATE agents SET embedding = $1::vector WHERE id = $2`, vecStr, ag.id); err != nil {
+			continue
+		}
+		updated++
+	}
+	slog.Info("agent embeddings backfill complete", "updated", updated)
+	return updated, nil
+}
+
 // agentSelectCols is the column list for all agent SELECT queries.
-const agentSelectCols = `id, agent_key, display_name, owner_id, provider, model,
+const agentSelectCols = `id, agent_key, display_name, frontmatter, owner_id, provider, model,
 		 context_window, max_tool_iterations, workspace, restrict_to_workspace,
 		 tools_config, sandbox_config, subagents_config, memory_config,
 		 compaction_config, context_pruning, other_config,
@@ -35,19 +113,27 @@ func (s *PGAgentStore) Create(ctx context.Context, agent *store.AgentData) error
 	agent.CreatedAt = now
 	agent.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO agents (id, agent_key, display_name, owner_id, provider, model,
+		`INSERT INTO agents (id, agent_key, display_name, frontmatter, owner_id, provider, model,
 		 context_window, max_tool_iterations, workspace, restrict_to_workspace,
 		 tools_config, sandbox_config, subagents_config, memory_config,
 		 compaction_config, context_pruning, other_config,
 		 agent_type, is_default, status, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
-		agent.ID, agent.AgentKey, agent.DisplayName, agent.OwnerID, agent.Provider, agent.Model,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
+		agent.ID, agent.AgentKey, agent.DisplayName, sql.NullString{String: agent.Frontmatter, Valid: agent.Frontmatter != ""}, agent.OwnerID, agent.Provider, agent.Model,
 		agent.ContextWindow, agent.MaxToolIterations, agent.Workspace, agent.RestrictToWorkspace,
 		jsonOrEmpty(agent.ToolsConfig), jsonOrNull(agent.SandboxConfig), jsonOrNull(agent.SubagentsConfig), jsonOrNull(agent.MemoryConfig),
 		jsonOrNull(agent.CompactionConfig), jsonOrNull(agent.ContextPruning), jsonOrEmpty(agent.OtherConfig),
 		agent.AgentType, agent.IsDefault, agent.Status, now, now,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Generate embedding for new agent with frontmatter
+	if agent.Frontmatter != "" && s.embProvider != nil {
+		go s.generateAgentEmbedding(context.Background(), agent.ID, agent.DisplayName, agent.Frontmatter)
+	}
+	return nil
 }
 
 func (s *PGAgentStore) GetByKey(ctx context.Context, agentKey string) (*store.AgentData, error) {
@@ -78,7 +164,21 @@ func (s *PGAgentStore) Update(ctx context.Context, id uuid.UUID, updates map[str
 		return nil
 	}
 	updates["updated_at"] = time.Now()
-	return execMapUpdateWhere(ctx, s.db, "agents", updates, "id = $IDX AND deleted_at IS NULL", id)
+	err := execMapUpdateWhere(ctx, s.db, "agents", updates, "id = $IDX AND deleted_at IS NULL", id)
+	if err != nil {
+		return err
+	}
+
+	// Regenerate embedding when frontmatter changes
+	if _, hasFrontmatter := updates["frontmatter"]; hasFrontmatter && s.embProvider != nil {
+		go func() {
+			ag, agErr := s.GetByID(context.Background(), id)
+			if agErr == nil {
+				s.generateAgentEmbedding(context.Background(), id, ag.DisplayName, ag.Frontmatter)
+			}
+		}()
+	}
+	return nil
 }
 
 func (s *PGAgentStore) Delete(ctx context.Context, id uuid.UUID) error {
@@ -200,14 +300,18 @@ type agentRowScanner interface {
 
 func scanAgentRow(row agentRowScanner) (*store.AgentData, error) {
 	var d store.AgentData
+	var frontmatter sql.NullString
 	// pgx: scan nullable JSONB into *[]byte (NOT *json.RawMessage — pgx can't scan NULL into defined types)
 	var toolsCfg, sandboxCfg, subagentsCfg, memoryCfg, compactionCfg, pruningCfg, otherCfg *[]byte
-	err := row.Scan(&d.ID, &d.AgentKey, &d.DisplayName, &d.OwnerID, &d.Provider, &d.Model,
+	err := row.Scan(&d.ID, &d.AgentKey, &d.DisplayName, &frontmatter, &d.OwnerID, &d.Provider, &d.Model,
 		&d.ContextWindow, &d.MaxToolIterations, &d.Workspace, &d.RestrictToWorkspace,
 		&toolsCfg, &sandboxCfg, &subagentsCfg, &memoryCfg, &compactionCfg, &pruningCfg, &otherCfg,
 		&d.AgentType, &d.IsDefault, &d.Status, &d.CreatedAt, &d.UpdatedAt)
 	if err != nil {
 		return nil, err
+	}
+	if frontmatter.Valid {
+		d.Frontmatter = frontmatter.String
 	}
 	// Convert *[]byte → json.RawMessage (nil-safe)
 	if toolsCfg != nil {

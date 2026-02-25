@@ -58,7 +58,7 @@ func (h *CustomToolsHandler) emitCacheInvalidate(key string) {
 	}
 	h.msgBus.Broadcast(bus.Event{
 		Name:    protocol.EventCacheInvalidate,
-		Payload: bus.CacheInvalidatePayload{Kind: "custom_tools", Key: key},
+		Payload: bus.CacheInvalidatePayload{Kind: bus.CacheKindCustomTools, Key: key},
 	})
 }
 
