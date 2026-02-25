@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/nextlevelbuilder/goclaw/internal/agent"
 	"github.com/nextlevelbuilder/goclaw/internal/bootstrap"
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
@@ -24,7 +26,7 @@ import (
 
 // createAgentLoop creates and registers an agent Loop for the given agent ID.
 // Works for "default" and any agent in agents.list.
-func createAgentLoop(agentID string, cfg *config.Config, router *agent.Router, providerReg *providers.Registry, msgBus *bus.MessageBus, sess store.SessionStore, toolsReg *tools.Registry, toolPE *tools.PolicyEngine, contextFiles []bootstrap.ContextFile, skillsLoader *skills.Loader, hasMemory bool, sandboxMgr sandbox.Manager) error {
+func createAgentLoop(agentID string, cfg *config.Config, router *agent.Router, providerReg *providers.Registry, msgBus *bus.MessageBus, sess store.SessionStore, toolsReg *tools.Registry, toolPE *tools.PolicyEngine, contextFiles []bootstrap.ContextFile, skillsLoader *skills.Loader, hasMemory bool, sandboxMgr sandbox.Manager, agentStore store.AgentStore, ensureUserFiles agent.EnsureUserFilesFunc, contextFileLoader agent.ContextFileLoaderFunc) error {
 	agentCfg := cfg.ResolveAgent(agentID)
 
 	provider, err := providerReg.Get(agentCfg.Provider)
@@ -74,8 +76,20 @@ func createAgentLoop(agentID string, cfg *config.Config, router *agent.Router, p
 		agentToolPolicy = spec.Tools
 	}
 
+	// Resolve AgentUUID and AgentType from store (standalone mode with FileAgentStore)
+	var agentUUID uuid.UUID
+	var agentType string
+	if agentStore != nil {
+		if ad, err := agentStore.GetByKey(context.Background(), agentID); err == nil {
+			agentUUID = ad.ID
+			agentType = ad.AgentType
+		}
+	}
+
 	loop := agent.NewLoop(agent.LoopConfig{
 		ID:             agentID,
+		AgentUUID:      agentUUID,
+		AgentType:      agentType,
 		Provider:       provider,
 		Model:          agentCfg.Model,
 		ContextWindow:  agentCfg.ContextWindow,
@@ -90,7 +104,9 @@ func createAgentLoop(agentID string, cfg *config.Config, router *agent.Router, p
 		SkillsLoader:   skillsLoader,
 		SkillAllowList: skillAllowList,
 		HasMemory:      hasMemory,
-		ContextFiles:  contextFiles,
+		ContextFiles:      contextFiles,
+		EnsureUserFiles:   ensureUserFiles,
+		ContextFileLoader: contextFileLoader,
 		CompactionCfg:      cfg.Agents.Defaults.Compaction,
 		ContextPruningCfg:  cfg.Agents.Defaults.ContextPruning,
 		SandboxEnabled:         sandboxEnabled,

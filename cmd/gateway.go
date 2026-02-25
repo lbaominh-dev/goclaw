@@ -520,6 +520,20 @@ func runGateway() {
 		}
 	}
 
+	// Standalone mode: wire FileAgentStore + interceptors + callbacks.
+	// Must happen after tool registration (wires interceptors to read_file, write_file, edit).
+	var fileAgentStore store.AgentStore
+	var ensureUserFiles agent.EnsureUserFilesFunc
+	var contextFileLoader agent.ContextFileLoaderFunc
+	if cfg.Database.Mode != "managed" {
+		var standaloneCleanup func()
+		fileAgentStore, ensureUserFiles, contextFileLoader, standaloneCleanup =
+			wireStandaloneExtras(cfg, toolsReg, dataDir, workspace)
+		if standaloneCleanup != nil {
+			defer standaloneCleanup()
+		}
+	}
+
 	// Create all agents
 	agentRouter := agent.NewRouter()
 
@@ -529,7 +543,7 @@ func runGateway() {
 	// In standalone mode, create agents eagerly from config.
 	if !isManaged {
 		// Always create "default" agent
-		if err := createAgentLoop("default", cfg, agentRouter, providerRegistry, msgBus, sessStore, toolsReg, toolPE, contextFiles, skillsLoader, hasMemory, sandboxMgr); err != nil {
+		if err := createAgentLoop("default", cfg, agentRouter, providerRegistry, msgBus, sessStore, toolsReg, toolPE, contextFiles, skillsLoader, hasMemory, sandboxMgr, fileAgentStore, ensureUserFiles, contextFileLoader); err != nil {
 			slog.Error("failed to create default agent", "error", err)
 			os.Exit(1)
 		}
@@ -539,7 +553,7 @@ func runGateway() {
 			if agentID == "default" {
 				continue
 			}
-			if err := createAgentLoop(agentID, cfg, agentRouter, providerRegistry, msgBus, sessStore, toolsReg, toolPE, contextFiles, skillsLoader, hasMemory, sandboxMgr); err != nil {
+			if err := createAgentLoop(agentID, cfg, agentRouter, providerRegistry, msgBus, sessStore, toolsReg, toolPE, contextFiles, skillsLoader, hasMemory, sandboxMgr, fileAgentStore, ensureUserFiles, contextFileLoader); err != nil {
 				slog.Error("failed to create agent", "agent", agentID, "error", err)
 			}
 		}

@@ -3,12 +3,10 @@ package cmd
 import (
 	"context"
 	"log/slog"
-	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/nextlevelbuilder/goclaw/internal/agent"
-	"github.com/nextlevelbuilder/goclaw/internal/bootstrap"
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/config"
 	httpapi "github.com/nextlevelbuilder/goclaw/internal/http"
@@ -52,44 +50,13 @@ func wireManagedExtras(
 	// 2. User seeding callback: seeds per-user context files on first chat
 	var ensureUserFiles agent.EnsureUserFilesFunc
 	if stores.Agents != nil {
-		as := stores.Agents
-		ensureUserFiles = func(ctx context.Context, agentID uuid.UUID, userID, agentType, workspace string) error {
-			isNew, err := as.GetOrCreateUserProfile(ctx, agentID, userID, workspace)
-			if err != nil {
-				return err
-			}
-			if !isNew {
-				return nil // already profiled = already seeded
-			}
-
-			// Auto-add first group member as a file writer (bootstrap the allowlist).
-			if strings.HasPrefix(userID, "group:") {
-				senderID := store.SenderIDFromContext(ctx)
-				if senderID != "" {
-					parts := strings.SplitN(senderID, "|", 2)
-					numericID := parts[0]
-					senderUsername := ""
-					if len(parts) > 1 {
-						senderUsername = parts[1]
-					}
-					if addErr := as.AddGroupFileWriter(ctx, agentID, userID, numericID, "", senderUsername); addErr != nil {
-						slog.Warn("failed to auto-add group file writer", "error", addErr, "sender", numericID, "group", userID)
-					}
-				}
-			}
-
-			_, err = bootstrap.SeedUserFiles(ctx, as, agentID, userID, agentType)
-			return err
-		}
+		ensureUserFiles = buildEnsureUserFiles(stores.Agents)
 	}
 
 	// 3. Context file loader callback: loads per-user context files dynamically
 	var contextFileLoader agent.ContextFileLoaderFunc
 	if contextFileInterceptor != nil {
-		intc := contextFileInterceptor
-		contextFileLoader = func(ctx context.Context, agentID uuid.UUID, userID, agentType string) []bootstrap.ContextFile {
-			return intc.LoadContextFiles(ctx, agentID, userID, agentType)
-		}
+		contextFileLoader = buildContextFileLoader(contextFileInterceptor)
 	}
 
 	// 4. Compute global sandbox defaults for resolver

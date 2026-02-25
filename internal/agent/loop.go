@@ -335,9 +335,9 @@ func (l *Loop) runLoop(ctx context.Context, req RunRequest) (*RunResult, error) 
 		ctx = store.WithSenderID(ctx, req.SenderID)
 	}
 
-	// Per-user workspace isolation (managed mode only).
+	// Per-user workspace isolation.
 	// Each user gets a subdirectory within the agent's workspace.
-	if l.agentUUID != uuid.Nil && l.workspace != "" {
+	if l.workspace != "" {
 		effectiveWorkspace := l.workspace
 		if req.UserID != "" {
 			effectiveWorkspace = filepath.Join(l.workspace, sanitizePathSegment(req.UserID))
