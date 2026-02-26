@@ -56,8 +56,14 @@ const CustomToolsPage = lazy(() =>
 const MCPPage = lazy(() =>
   import("@/pages/mcp/mcp-page").then((m) => ({ default: m.MCPPage })),
 );
+const TeamsPage = lazy(() =>
+  import("@/pages/teams/teams-page").then((m) => ({ default: m.TeamsPage })),
+);
 const TtsPage = lazy(() =>
   import("@/pages/tts/tts-page").then((m) => ({ default: m.TtsPage })),
+);
+const DelegationsPage = lazy(() =>
+  import("@/pages/delegations/delegations-page").then((m) => ({ default: m.DelegationsPage })),
 );
 
 function PageLoader() {
@@ -87,6 +93,8 @@ export function AppRoutes() {
           <Route path={ROUTES.CHAT_SESSION} element={<ChatPage />} />
           <Route path={ROUTES.AGENTS} element={<AgentsPage key="list" />} />
           <Route path={ROUTES.AGENT_DETAIL} element={<AgentsPage key="detail" />} />
+          <Route path={ROUTES.TEAMS} element={<TeamsPage key="list" />} />
+          <Route path={ROUTES.TEAM_DETAIL} element={<TeamsPage key="detail" />} />
           <Route path={ROUTES.SESSIONS} element={<SessionsPage key="list" />} />
           <Route path={ROUTES.SESSION_DETAIL} element={<SessionsPage key="detail" />} />
           <Route path={ROUTES.SKILLS} element={<SkillsPage key="list" />} />
@@ -95,6 +103,7 @@ export function AppRoutes() {
           <Route path={ROUTES.CONFIG} element={<ConfigPage />} />
           <Route path={ROUTES.TRACES} element={<TracesPage key="list" />} />
           <Route path={ROUTES.TRACE_DETAIL} element={<TracesPage key="detail" />} />
+          <Route path={ROUTES.DELEGATIONS} element={<DelegationsPage />} />
           <Route path={ROUTES.USAGE} element={<UsagePage />} />
           <Route path={ROUTES.CHANNELS} element={<ChannelsPage />} />
           <Route path={ROUTES.APPROVALS} element={<ApprovalsPage />} />

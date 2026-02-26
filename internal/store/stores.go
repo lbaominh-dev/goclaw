@@ -15,4 +15,6 @@ type Stores struct {
 	CustomTools      CustomToolStore      // nil in standalone mode
 	ChannelInstances ChannelInstanceStore // nil in standalone mode
 	ConfigSecrets    ConfigSecretsStore   // nil in standalone mode
+	AgentLinks       AgentLinkStore       // nil in standalone mode
+	Teams            TeamStore            // nil in standalone mode
 }

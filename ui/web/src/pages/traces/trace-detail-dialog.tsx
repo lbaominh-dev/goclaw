@@ -41,9 +41,10 @@ interface TraceDetailDialogProps {
   traceId: string;
   onClose: () => void;
   getTrace: (id: string) => Promise<{ trace: TraceData; spans: SpanData[] } | null>;
+  onNavigateTrace?: (traceId: string) => void;
 }
 
-export function TraceDetailDialog({ traceId, onClose, getTrace }: TraceDetailDialogProps) {
+export function TraceDetailDialog({ traceId, onClose, getTrace, onNavigateTrace }: TraceDetailDialogProps) {
   const [trace, setTrace] = useState<TraceData | null>(null);
   const [spans, setSpans] = useState<SpanData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,6 +99,13 @@ export function TraceDetailDialog({ traceId, onClose, getTrace }: TraceDetailDia
               <div>
                 <span className="text-muted-foreground">Tokens:</span>{" "}
                 {formatTokens(trace.total_input_tokens)} in / {formatTokens(trace.total_output_tokens)} out
+                {((trace.metadata?.total_cache_read_tokens ?? 0) > 0 || (trace.metadata?.total_cache_creation_tokens ?? 0) > 0) && (
+                  <span className="ml-1 text-xs">
+                    {(trace.metadata?.total_cache_read_tokens ?? 0) > 0 && (
+                      <span className="text-green-400">{formatTokens(trace.metadata!.total_cache_read_tokens!)} cached</span>
+                    )}
+                  </span>
+                )}
               </div>
               <div>
                 <span className="text-muted-foreground">Spans:</span>{" "}
@@ -107,6 +115,18 @@ export function TraceDetailDialog({ traceId, onClose, getTrace }: TraceDetailDia
                 <span className="text-muted-foreground">Started:</span>{" "}
                 {formatDate(trace.start_time)}
               </div>
+              {trace.parent_trace_id && (
+                <div>
+                  <span className="text-muted-foreground">Delegated from:</span>{" "}
+                  <button
+                    type="button"
+                    className="cursor-pointer font-mono text-xs text-primary hover:underline"
+                    onClick={() => onNavigateTrace?.(trace.parent_trace_id!)}
+                  >
+                    {trace.parent_trace_id.slice(0, 8)}...
+                  </button>
+                </div>
+              )}
             </div>
 
             {trace.input_preview && (
@@ -164,7 +184,7 @@ function SpanTreeNode({ node, depth }: { node: SpanNode; depth: number }) {
           {hasChildren ? (
             <button
               type="button"
-              className="flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-muted"
+              className="flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded hover:bg-muted"
               onClick={() => setExpanded(!expanded)}
             >
               {expanded ? (
@@ -180,7 +200,7 @@ function SpanTreeNode({ node, depth }: { node: SpanNode; depth: number }) {
           {/* Span info row - clickable for detail */}
           <button
             type="button"
-            className="flex flex-1 items-center gap-2 text-left hover:opacity-80"
+            className="flex flex-1 cursor-pointer items-center gap-2 text-left hover:opacity-80"
             onClick={() => setDetailOpen(!detailOpen)}
           >
             <Badge variant="outline" className="shrink-0 text-xs">
@@ -192,6 +212,11 @@ function SpanTreeNode({ node, depth }: { node: SpanNode; depth: number }) {
             {(span.input_tokens > 0 || span.output_tokens > 0) && (
               <span className="shrink-0 text-xs text-muted-foreground">
                 {formatTokens(span.input_tokens)}/{formatTokens(span.output_tokens)}
+                {(span.metadata?.cache_read_tokens ?? 0) > 0 && (
+                  <span className="ml-1 text-green-400" title="Cached tokens read">
+                    ({formatTokens(span.metadata!.cache_read_tokens!)} cached)
+                  </span>
+                )}
               </span>
             )}
             <span className="shrink-0 text-xs text-muted-foreground">
@@ -213,6 +238,18 @@ function SpanTreeNode({ node, depth }: { node: SpanNode; depth: number }) {
               <div className="text-xs">
                 <span className="text-muted-foreground">Tokens:</span>{" "}
                 {formatTokens(span.input_tokens)} in / {formatTokens(span.output_tokens)} out
+                {((span.metadata?.cache_creation_tokens ?? 0) > 0 || (span.metadata?.cache_read_tokens ?? 0) > 0) && (
+                  <span className="ml-2 text-muted-foreground">
+                    (cache:
+                    {(span.metadata?.cache_read_tokens ?? 0) > 0 && (
+                      <span className="ml-1 text-green-400">{formatTokens(span.metadata!.cache_read_tokens!)} read</span>
+                    )}
+                    {(span.metadata?.cache_creation_tokens ?? 0) > 0 && (
+                      <span className="ml-1 text-yellow-400">{formatTokens(span.metadata!.cache_creation_tokens!)} write</span>
+                    )}
+                    )
+                  </span>
+                )}
               </div>
             )}
             {span.input_preview && (

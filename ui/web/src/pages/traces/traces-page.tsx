@@ -179,6 +179,7 @@ export function TracesPage() {
           traceId={selectedTraceId}
           onClose={() => setSelectedTraceId(null)}
           getTrace={getTrace}
+          onNavigateTrace={setSelectedTraceId}
         />
       )}
     </div>

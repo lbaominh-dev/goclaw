@@ -62,6 +62,13 @@ export function AgentCard({ agent, onClick, onResummon }: AgentCardProps) {
         </div>
       )}
 
+      {/* Expertise summary */}
+      {agent.frontmatter && (
+        <div className="line-clamp-3 text-xs text-muted-foreground/70">
+          {agent.frontmatter}
+        </div>
+      )}
+
       {/* Bottom badges */}
       <div className="flex items-center gap-1.5">
         <Badge variant="outline" className="text-[11px]">{agent.agent_type}</Badge>

@@ -17,7 +17,7 @@ import (
 func SeedToStore(ctx context.Context, agentStore store.AgentStore, agentID uuid.UUID, agentType string) ([]string, error) {
 	// Open agents don't need agent-level context files —
 	// all files are seeded per-user from embedded templates on first chat.
-	if agentType == "open" {
+	if agentType == store.AgentTypeOpen {
 		return nil, nil
 	}
 
@@ -89,7 +89,7 @@ var userSeedFilesPredefined = []string{
 // Returns the list of file names that were seeded.
 func SeedUserFiles(ctx context.Context, agentStore store.AgentStore, agentID uuid.UUID, userID, agentType string) ([]string, error) {
 	files := userSeedFilesOpen
-	if agentType == "predefined" {
+	if agentType == store.AgentTypePredefined {
 		files = userSeedFilesPredefined
 	}
 
@@ -113,7 +113,7 @@ func SeedUserFiles(ctx context.Context, agentStore store.AgentStore, agentID uui
 
 		// Predefined agents use a user-focused bootstrap template
 		templateName := name
-		if agentType == "predefined" && name == BootstrapFile {
+		if agentType == store.AgentTypePredefined && name == BootstrapFile {
 			templateName = "BOOTSTRAP_PREDEFINED.md"
 		}
 

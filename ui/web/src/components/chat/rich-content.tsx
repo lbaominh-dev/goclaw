@@ -179,7 +179,7 @@ function FileBlock({ name, mime, content }: { name: string; mime: string; conten
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-muted/50"
+        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-muted/50"
       >
         {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         <FileText className="h-3.5 w-3.5 text-muted-foreground" />

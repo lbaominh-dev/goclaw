@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/nextlevelbuilder/goclaw/internal/bootstrap"
 )
 
 // ManagerConfig configures the memory manager.
@@ -169,7 +171,7 @@ func (m *Manager) IndexAll(ctx context.Context) error {
 	memoryDir := m.config.MemoryDir
 
 	// Index MEMORY.md at root
-	memoryFile := filepath.Join(memoryDir, "MEMORY.md")
+	memoryFile := filepath.Join(memoryDir, bootstrap.MemoryFile)
 	if _, err := os.Stat(memoryFile); err == nil {
 		if err := m.IndexFile(ctx, memoryFile); err != nil {
 			slog.Warn("failed to index MEMORY.md", "error", err)

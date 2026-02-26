@@ -16,6 +16,7 @@ type ReadFileTool struct {
 	workspace       string
 	restrict        bool
 	allowedPrefixes []string              // extra allowed path prefixes (e.g. skills dirs)
+	deniedPrefixes  []string              // path prefixes to deny access to (e.g. .goclaw)
 	sandboxMgr      sandbox.Manager       // nil = direct host access
 	contextFileIntc *ContextFileInterceptor // nil = no virtual FS routing (standalone mode)
 	memIntc         *MemoryInterceptor      // nil = no memory routing (standalone mode)
@@ -39,6 +40,11 @@ func NewReadFileTool(workspace string, restrict bool) *ReadFileTool {
 // even when restrict_to_workspace is true (e.g. skills directories).
 func (t *ReadFileTool) AllowPaths(prefixes ...string) {
 	t.allowedPrefixes = append(t.allowedPrefixes, prefixes...)
+}
+
+// DenyPaths adds path prefixes that read_file must reject (e.g. hidden dirs).
+func (t *ReadFileTool) DenyPaths(prefixes ...string) {
+	t.deniedPrefixes = append(t.deniedPrefixes, prefixes...)
 }
 
 func NewSandboxedReadFileTool(workspace string, restrict bool, mgr sandbox.Manager) *ReadFileTool {
@@ -110,6 +116,9 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]interface{})
 	if err != nil {
 		return ErrorResult(err.Error())
 	}
+	if err := checkDeniedPath(resolved, t.workspace, t.deniedPrefixes); err != nil {
+		return ErrorResult(err.Error())
+	}
 
 	data, err := os.ReadFile(resolved)
 	if err != nil {
@@ -158,6 +167,23 @@ func resolvePathWithAllowed(path, workspace string, restrict bool, allowedPrefix
 	}
 	slog.Warn("read_file: access denied", "path", cleaned, "workspace", workspace, "allowedPrefixes", allowedPrefixes)
 	return "", err
+}
+
+// checkDeniedPath returns an error if the resolved path falls under any denied prefix.
+// Denied prefixes are relative to the workspace (e.g. ".goclaw" denies workspace/.goclaw/).
+func checkDeniedPath(resolved, workspace string, deniedPrefixes []string) error {
+	if len(deniedPrefixes) == 0 {
+		return nil
+	}
+	absResolved, _ := filepath.Abs(resolved)
+	absWorkspace, _ := filepath.Abs(workspace)
+	for _, prefix := range deniedPrefixes {
+		denied := filepath.Join(absWorkspace, prefix)
+		if strings.HasPrefix(absResolved, denied) {
+			return fmt.Errorf("access denied: path %s is restricted", prefix)
+		}
+	}
+	return nil
 }
 
 // resolvePath resolves a path relative to the workspace and validates it.

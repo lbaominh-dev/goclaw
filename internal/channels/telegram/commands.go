@@ -3,9 +3,7 @@ package telegram
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/mymmrac/telego"
@@ -71,6 +69,8 @@ func (c *Channel) handleBotCommand(ctx context.Context, message *telego.Message,
 			"/stopall — Stop all running tasks\n" +
 			"/reset — Reset conversation history\n" +
 			"/status — Show bot status\n" +
+			"/tasks — List team tasks\n" +
+			"/task_detail <id> — View task detail\n" +
 			"/writers — List file writers for this group\n" +
 			"/addwriter — Add a file writer (reply to their message)\n" +
 			"/removewriter — Remove a file writer (reply to their message)\n" +
@@ -126,9 +126,7 @@ func (c *Channel) handleBotCommand(ctx context.Context, message *telego.Message,
 				"message_thread_id": fmt.Sprintf("%d", messageThreadID),
 			},
 		})
-		msg := tu.Message(chatIDObj, "Stopping current task…")
-		setThread(msg)
-		c.bot.SendMessage(ctx, msg)
+		// Feedback is sent by the consumer after cancel result is known.
 		return true
 
 	case "/stopall":
@@ -151,9 +149,7 @@ func (c *Channel) handleBotCommand(ctx context.Context, message *telego.Message,
 				"message_thread_id": fmt.Sprintf("%d", messageThreadID),
 			},
 		})
-		msg := tu.Message(chatIDObj, "Stopping all tasks…")
-		setThread(msg)
-		c.bot.SendMessage(ctx, msg)
+		// Feedback is sent by the consumer after cancel result is known.
 		return true
 
 	case "/status":
@@ -161,6 +157,14 @@ func (c *Channel) handleBotCommand(ctx context.Context, message *telego.Message,
 		msg := tu.Message(chatIDObj, statusText)
 		setThread(msg)
 		c.bot.SendMessage(ctx, msg)
+		return true
+
+	case "/tasks":
+		c.handleTasksList(ctx, chatID, setThread)
+		return true
+
+	case "/task_detail":
+		c.handleTaskDetail(ctx, chatID, text, setThread)
 		return true
 
 	case "/addwriter":
@@ -179,261 +183,3 @@ func (c *Channel) handleBotCommand(ctx context.Context, message *telego.Message,
 	return false
 }
 
-// handleWriterCommand handles /addwriter and /removewriter commands.
-// The target user is identified by replying to one of their messages.
-func (c *Channel) handleWriterCommand(ctx context.Context, message *telego.Message, chatID int64, chatIDStr, senderID string, isGroup bool, setThread func(*telego.SendMessageParams), action string) {
-	chatIDObj := tu.ID(chatID)
-
-	send := func(text string) {
-		msg := tu.Message(chatIDObj, text)
-		setThread(msg)
-		c.bot.SendMessage(ctx, msg)
-	}
-
-	if !isGroup {
-		send("This command only works in group chats.")
-		return
-	}
-
-	if c.agentStore == nil {
-		send("File writer management is not available.")
-		return
-	}
-
-	agentID, err := c.resolveAgentUUID(ctx)
-	if err != nil {
-		slog.Debug("writer command: agent resolve failed", "error", err)
-		send("File writer management is not available (no agent).")
-		return
-	}
-
-	groupID := fmt.Sprintf("group:%s:%s", c.Name(), chatIDStr)
-	senderNumericID := strings.SplitN(senderID, "|", 2)[0]
-
-	// Check if sender is an existing writer (only writers can manage the list)
-	isWriter, err := c.agentStore.IsGroupFileWriter(ctx, agentID, groupID, senderNumericID)
-	if err != nil {
-		slog.Warn("writer check failed", "error", err, "sender", senderNumericID)
-		send("Failed to check permissions. Please try again.")
-		return
-	}
-	if !isWriter {
-		send("Only existing file writers can manage the writer list.")
-		return
-	}
-
-	// Extract target user from reply-to message
-	if message.ReplyToMessage == nil || message.ReplyToMessage.From == nil {
-		verb := "add"
-		if action == "remove" {
-			verb = "remove"
-		}
-		send(fmt.Sprintf("To %s a writer: find a message from that person, swipe to reply it, then type /%swriter.", verb, verb))
-		return
-	}
-
-	targetUser := message.ReplyToMessage.From
-	targetID := fmt.Sprintf("%d", targetUser.ID)
-	targetName := targetUser.FirstName
-	if targetUser.Username != "" {
-		targetName = "@" + targetUser.Username
-	}
-
-	switch action {
-	case "add":
-		if err := c.agentStore.AddGroupFileWriter(ctx, agentID, groupID, targetID, targetUser.FirstName, targetUser.Username); err != nil {
-			slog.Warn("add writer failed", "error", err, "target", targetID)
-			send("Failed to add writer. Please try again.")
-			return
-		}
-		send(fmt.Sprintf("Added %s as a file writer.", targetName))
-
-	case "remove":
-		// Prevent removing the last writer
-		writers, _ := c.agentStore.ListGroupFileWriters(ctx, agentID, groupID)
-		if len(writers) <= 1 {
-			send("Cannot remove the last file writer.")
-			return
-		}
-		if err := c.agentStore.RemoveGroupFileWriter(ctx, agentID, groupID, targetID); err != nil {
-			slog.Warn("remove writer failed", "error", err, "target", targetID)
-			send("Failed to remove writer. Please try again.")
-			return
-		}
-		send(fmt.Sprintf("Removed %s from file writers.", targetName))
-	}
-}
-
-// handleListWriters handles the /writers command.
-func (c *Channel) handleListWriters(ctx context.Context, chatID int64, chatIDStr string, isGroup bool, setThread func(*telego.SendMessageParams)) {
-	chatIDObj := tu.ID(chatID)
-
-	send := func(text string) {
-		msg := tu.Message(chatIDObj, text)
-		setThread(msg)
-		c.bot.SendMessage(ctx, msg)
-	}
-
-	if !isGroup {
-		send("This command only works in group chats.")
-		return
-	}
-
-	if c.agentStore == nil {
-		send("File writer management is not available.")
-		return
-	}
-
-	agentID, err := c.resolveAgentUUID(ctx)
-	if err != nil {
-		slog.Debug("list writers: agent resolve failed", "error", err)
-		send("File writer management is not available (no agent).")
-		return
-	}
-
-	groupID := fmt.Sprintf("group:%s:%s", c.Name(), chatIDStr)
-
-	writers, err := c.agentStore.ListGroupFileWriters(ctx, agentID, groupID)
-	if err != nil {
-		slog.Warn("list writers failed", "error", err)
-		send("Failed to list writers. Please try again.")
-		return
-	}
-
-	if len(writers) == 0 {
-		send("No file writers configured for this group. The first person to interact with the bot will be added automatically.")
-		return
-	}
-
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("File writers for this group (%d):\n", len(writers)))
-	for i, w := range writers {
-		label := w.UserID
-		if w.Username != nil && *w.Username != "" {
-			label = "@" + *w.Username
-		} else if w.DisplayName != nil && *w.DisplayName != "" {
-			label = *w.DisplayName
-		}
-		sb.WriteString(fmt.Sprintf("%d. %s (ID: %s)\n", i+1, label, w.UserID))
-	}
-	send(sb.String())
-}
-
-// --- Pairing UX ---
-
-// buildPairingReply builds the pairing reply message matching TS behavior.
-func buildPairingReply(telegramUserID, code string) string {
-	return fmt.Sprintf(
-		"GoClaw: access not configured.\n\nYour Telegram user id: %s\n\nPairing code: %s\n\nAsk the bot owner to approve with:\n  goclaw pairing approve %s",
-		telegramUserID, code, code,
-	)
-}
-
-// sendPairingReply generates a pairing code and sends the reply to the user.
-// Debounces: won't send another reply to the same user within 60 seconds.
-func (c *Channel) sendPairingReply(ctx context.Context, chatID int64, userID, username string) {
-	if c.pairingService == nil {
-		return
-	}
-
-	if lastSent, ok := c.pairingReplySent.Load(userID); ok {
-		if time.Since(lastSent.(time.Time)) < pairingReplyDebounce {
-			slog.Debug("pairing reply debounced", "user_id", userID)
-			return
-		}
-	}
-
-	code, err := c.pairingService.RequestPairing(userID, c.Name(), fmt.Sprintf("%d", chatID), "default")
-	if err != nil {
-		slog.Debug("pairing request failed", "user_id", userID, "error", err)
-		return
-	}
-
-	replyText := buildPairingReply(userID, code)
-	msg := tu.Message(tu.ID(chatID), replyText)
-	if _, err := c.bot.SendMessage(ctx, msg); err != nil {
-		slog.Warn("failed to send pairing reply", "chat_id", chatID, "error", err)
-	} else {
-		c.pairingReplySent.Store(userID, time.Now())
-		slog.Info("telegram pairing reply sent",
-			"user_id", userID, "username", username, "code", code,
-		)
-	}
-}
-
-// sendGroupPairingReply generates a pairing code for a group and sends the reply.
-// Debounces: won't send another reply to the same group within 60 seconds.
-func (c *Channel) sendGroupPairingReply(ctx context.Context, chatID int64, chatIDStr, groupSenderID string) {
-	if lastSent, ok := c.pairingReplySent.Load(chatIDStr); ok {
-		if time.Since(lastSent.(time.Time)) < pairingReplyDebounce {
-			return
-		}
-	}
-
-	code, err := c.pairingService.RequestPairing(groupSenderID, c.Name(), chatIDStr, "default")
-	if err != nil {
-		slog.Debug("group pairing request failed", "chat_id", chatIDStr, "error", err)
-		return
-	}
-
-	replyText := fmt.Sprintf(
-		"This group is not approved yet.\n\nPairing code: %s\n\nAsk the bot owner to approve with:\n  goclaw pairing approve %s",
-		code, code,
-	)
-	msg := tu.Message(tu.ID(chatID), replyText)
-	if _, err := c.bot.SendMessage(ctx, msg); err != nil {
-		slog.Warn("failed to send group pairing reply", "chat_id", chatIDStr, "error", err)
-	} else {
-		c.pairingReplySent.Store(chatIDStr, time.Now())
-		slog.Info("telegram group pairing reply sent", "chat_id", chatIDStr, "code", code)
-	}
-}
-
-// SendPairingApproved sends the approval notification to a user.
-func (c *Channel) SendPairingApproved(ctx context.Context, chatID, botName string) error {
-	id, err := parseChatID(chatID)
-	if err != nil {
-		return fmt.Errorf("invalid chat ID: %w", err)
-	}
-	if botName == "" {
-		botName = "GoClaw"
-	}
-
-	msg := tu.Message(tu.ID(id), fmt.Sprintf("✅ %s access approved. Send a message to start chatting.", botName))
-	_, err = c.bot.SendMessage(ctx, msg)
-	return err
-}
-
-// SyncMenuCommands registers bot commands with Telegram via setMyCommands.
-func (c *Channel) SyncMenuCommands(ctx context.Context, commands []telego.BotCommand) error {
-	if err := c.bot.DeleteMyCommands(ctx, nil); err != nil {
-		slog.Debug("deleteMyCommands failed (may not exist)", "error", err)
-	}
-
-	if len(commands) == 0 {
-		return nil
-	}
-
-	if len(commands) > 100 {
-		commands = commands[:100]
-	}
-
-	return c.bot.SetMyCommands(ctx, &telego.SetMyCommandsParams{
-		Commands: commands,
-	})
-}
-
-// DefaultMenuCommands returns the default bot menu commands.
-func DefaultMenuCommands() []telego.BotCommand {
-	return []telego.BotCommand{
-		{Command: "start", Description: "Start chatting with the bot"},
-		{Command: "help", Description: "Show available commands"},
-		{Command: "stop", Description: "Stop current running task"},
-		{Command: "stopall", Description: "Stop all running tasks"},
-		{Command: "reset", Description: "Reset conversation history"},
-		{Command: "status", Description: "Show bot status"},
-		{Command: "writers", Description: "List file writers for this group"},
-		{Command: "addwriter", Description: "Add a file writer (reply to their message)"},
-		{Command: "removewriter", Description: "Remove a file writer (reply to their message)"},
-	}
-}

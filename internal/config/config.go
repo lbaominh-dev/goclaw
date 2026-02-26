@@ -119,6 +119,7 @@ type AgentDefaults struct {
 	Temperature         float64         `json:"temperature"`
 	MaxToolIterations   int             `json:"max_tool_iterations"`
 	ContextWindow       int             `json:"context_window"`
+	AgentType           string          `json:"agent_type,omitempty"` // "open" (default) or "predefined"
 	Subagents           *SubagentsConfig `json:"subagents,omitempty"`
 	Sandbox             *SandboxConfig         `json:"sandbox,omitempty"`
 	Memory              *MemoryConfig         `json:"memory,omitempty"`
@@ -373,8 +374,9 @@ type AgentSpec struct {
 	Temperature       float64         `json:"temperature,omitempty"`
 	MaxToolIterations int             `json:"max_tool_iterations,omitempty"`
 	ContextWindow     int             `json:"context_window,omitempty"`
-	Skills            []string        `json:"skills,omitempty"` // nil = all skills allowed
-	Tools             *ToolPolicySpec `json:"tools,omitempty"`  // per-agent tool policy
+	AgentType         string          `json:"agent_type,omitempty"` // "open" or "predefined"
+	Skills            []string        `json:"skills,omitempty"`     // nil = all skills allowed
+	Tools             *ToolPolicySpec `json:"tools,omitempty"`      // per-agent tool policy
 	Workspace         string          `json:"workspace,omitempty"`
 	Default           bool            `json:"default,omitempty"`
 	Sandbox           *SandboxConfig  `json:"sandbox,omitempty"`

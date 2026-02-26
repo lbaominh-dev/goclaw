@@ -65,6 +65,11 @@ type PathAllowable interface {
 	AllowPaths(...string)
 }
 
+// PathDenyable tools can deny access to specific path prefixes within the workspace.
+type PathDenyable interface {
+	DenyPaths(...string)
+}
+
 // SessionStoreAware tools can receive a SessionStore for session queries.
 type SessionStoreAware interface {
 	SetSessionStore(store.SessionStore)

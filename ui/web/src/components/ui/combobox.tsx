@@ -26,10 +26,11 @@ export function Combobox({
   const [search, setSearch] = React.useState("");
   const containerRef = React.useRef<HTMLDivElement>(null);
 
-  // Sync search text when value changes externally
+  // Sync search text when value changes externally — show label if available
   React.useEffect(() => {
-    setSearch(value);
-  }, [value]);
+    const match = options.find((o) => o.value === value);
+    setSearch(match?.label || value);
+  }, [value, options]);
 
   // Close on outside click
   React.useEffect(() => {
@@ -55,7 +56,8 @@ export function Combobox({
 
   const handleSelect = (val: string) => {
     onChange(val);
-    setSearch(val);
+    const match = options.find((o) => o.value === val);
+    setSearch(match?.label || val);
     setOpen(false);
   };
 
@@ -92,7 +94,7 @@ export function Combobox({
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleSelect(o.value)}
-              className="hover:bg-accent hover:text-accent-foreground relative flex w-full cursor-default items-center rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none"
+              className="hover:bg-accent hover:text-accent-foreground relative flex w-full cursor-pointer items-center rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none"
             >
               <span className="truncate">{o.label || o.value}</span>
               {o.value === value && (

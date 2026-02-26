@@ -23,13 +23,23 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 	"github.com/nextlevelbuilder/goclaw/internal/tools"
 	"github.com/nextlevelbuilder/goclaw/internal/tracing"
+	"github.com/nextlevelbuilder/goclaw/pkg/protocol"
 )
+
+// bootstrapAutoCleanupTurns is the number of user messages after which
+// BOOTSTRAP.md is auto-removed if the LLM hasn't cleared it.
+// Bootstrap typically completes in 2-3 conversation turns.
+const bootstrapAutoCleanupTurns = 3
 
 // EnsureUserFilesFunc seeds per-user context files on first chat (managed mode).
 type EnsureUserFilesFunc func(ctx context.Context, agentID uuid.UUID, userID, agentType, workspace string) error
 
 // ContextFileLoaderFunc loads context files dynamically per-request (managed mode).
 type ContextFileLoaderFunc func(ctx context.Context, agentID uuid.UUID, userID, agentType string) []bootstrap.ContextFile
+
+// BootstrapCleanupFunc removes BOOTSTRAP.md after a successful first run.
+// Called automatically so the system doesn't rely on the LLM to delete it.
+type BootstrapCleanupFunc func(ctx context.Context, agentID uuid.UUID, userID string) error
 
 // Loop is the agent execution loop for one agent instance.
 // Think → Act → Observe cycle with tool execution.
@@ -61,9 +71,10 @@ type Loop struct {
 	contextFiles   []bootstrap.ContextFile
 
 	// Per-user file seeding + dynamic context loading (managed mode)
-	ensureUserFiles   EnsureUserFilesFunc
-	contextFileLoader ContextFileLoaderFunc
-	seededUsers       sync.Map // userID → true, avoid re-check per request
+	ensureUserFiles    EnsureUserFilesFunc
+	contextFileLoader  ContextFileLoaderFunc
+	bootstrapCleanup   BootstrapCleanupFunc
+	seededUsers        sync.Map // userID → true, avoid re-check per request
 
 	// Compaction config (memory flush settings)
 	compactionCfg *config.CompactionConfig
@@ -136,6 +147,7 @@ type LoopConfig struct {
 	// Per-user file seeding + dynamic context loading (managed mode)
 	EnsureUserFiles   EnsureUserFilesFunc
 	ContextFileLoader ContextFileLoaderFunc
+	BootstrapCleanup  BootstrapCleanupFunc
 
 	// Tracing collector (nil = no tracing)
 	TraceCollector *tracing.Collector
@@ -189,8 +201,9 @@ func NewLoop(cfg LoopConfig) *Loop {
 		skillAllowList: cfg.SkillAllowList,
 		hasMemory:     cfg.HasMemory,
 		contextFiles:  cfg.ContextFiles,
-		ensureUserFiles:   cfg.EnsureUserFiles,
-		contextFileLoader: cfg.ContextFileLoader,
+		ensureUserFiles:    cfg.EnsureUserFiles,
+		contextFileLoader:  cfg.ContextFileLoader,
+		bootstrapCleanup:   cfg.BootstrapCleanup,
 		compactionCfg:     cfg.CompactionCfg,
 		contextPruningCfg: cfg.ContextPruningCfg,
 		sandboxEnabled:        cfg.SandboxEnabled,
@@ -234,7 +247,7 @@ func (l *Loop) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 	l.activeRuns.Add(1)
 	defer l.activeRuns.Add(-1)
 
-	l.emit(AgentEvent{Type: "run.started", AgentID: l.id, RunID: req.RunID})
+	l.emit(AgentEvent{Type: protocol.AgentEventRunStarted, AgentID: l.id, RunID: req.RunID})
 
 	// Create trace (managed mode only)
 	var traceID uuid.UUID
@@ -261,12 +274,16 @@ func (l *Loop) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 			Channel:      req.Channel,
 			Name:         "chat " + l.id,
 			InputPreview: truncateStr(req.Message, 500),
-			Status:       "running",
+			Status:       store.TraceStatusRunning,
 			StartTime:    now,
 			CreatedAt:    now,
 		}
 		if l.agentUUID != uuid.Nil {
 			trace.AgentID = &l.agentUUID
+		}
+		// Link to parent trace if this is a delegated run
+		if delegateParent := tracing.DelegateParentTraceIDFromContext(ctx); delegateParent != uuid.Nil {
+			trace.ParentTraceID = &delegateParent
 		}
 		if err := l.traceCollector.CreateTrace(ctx, trace); err != nil {
 			slog.Warn("tracing: failed to create trace", "error", err)
@@ -290,7 +307,7 @@ func (l *Loop) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 
 	if err != nil {
 		l.emit(AgentEvent{
-			Type:    "run.failed",
+			Type:    protocol.AgentEventRunFailed,
 			AgentID: l.id,
 			RunID:   req.RunID,
 			Payload: map[string]string{"error": err.Error()},
@@ -300,19 +317,19 @@ func (l *Loop) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 		// so the DB update still succeeds.
 		if !isChildTrace && l.traceCollector != nil && traceID != uuid.Nil {
 			traceCtx := ctx
-			traceStatus := "error"
+			traceStatus := store.TraceStatusError
 			if ctx.Err() != nil {
 				traceCtx = context.Background()
-				traceStatus = "cancelled"
+				traceStatus = store.TraceStatusCancelled
 			}
 			l.traceCollector.FinishTrace(traceCtx, traceID, traceStatus, err.Error(), "")
 		}
 		return nil, err
 	}
 
-	l.emit(AgentEvent{Type: "run.completed", AgentID: l.id, RunID: req.RunID})
+	l.emit(AgentEvent{Type: protocol.AgentEventRunCompleted, AgentID: l.id, RunID: req.RunID})
 	if !isChildTrace && l.traceCollector != nil && traceID != uuid.Nil {
-		l.traceCollector.FinishTrace(ctx, traceID, "completed", "", truncateStr(result.Content, 500))
+		l.traceCollector.FinishTrace(ctx, traceID, store.TraceStatusCompleted, "", truncateStr(result.Content, 500))
 	}
 	return result, nil
 }
@@ -335,9 +352,9 @@ func (l *Loop) runLoop(ctx context.Context, req RunRequest) (*RunResult, error) 
 		ctx = store.WithSenderID(ctx, req.SenderID)
 	}
 
-	// Per-user workspace isolation (managed mode only).
+	// Per-user workspace isolation.
 	// Each user gets a subdirectory within the agent's workspace.
-	if l.agentUUID != uuid.Nil && l.workspace != "" {
+	if l.workspace != "" {
 		effectiveWorkspace := l.workspace
 		if req.UserID != "" {
 			effectiveWorkspace = filepath.Join(l.workspace, sanitizePathSegment(req.UserID))
@@ -409,7 +426,9 @@ func (l *Loop) runLoop(ctx context.Context, req RunRequest) (*RunResult, error) 
 	history := l.sessions.GetHistory(req.SessionKey)
 	summary := l.sessions.GetSummary(req.SessionKey)
 
-	messages := l.buildMessages(ctx, history, summary, req.Message, req.ExtraSystemPrompt, req.SessionKey, req.Channel, req.UserID, req.HistoryLimit)
+	// buildMessages resolves context files once and also detects BOOTSTRAP.md presence
+	// (hadBootstrap) — no extra DB roundtrip needed for bootstrap detection.
+	messages, hadBootstrap := l.buildMessages(ctx, history, summary, req.Message, req.ExtraSystemPrompt, req.SessionKey, req.Channel, req.UserID, req.HistoryLimit)
 
 	// 2. Buffer new messages — write to session only AFTER the run completes.
 	// This prevents concurrent runs from seeing each other's in-progress messages.
@@ -458,7 +477,7 @@ func (l *Loop) runLoop(ctx context.Context, req RunRequest) (*RunResult, error) 
 			resp, err = l.provider.ChatStream(ctx, chatReq, func(chunk providers.StreamChunk) {
 				if chunk.Content != "" {
 					l.emit(AgentEvent{
-						Type:    "chunk",
+						Type:    protocol.ChatEventChunk,
 						AgentID: l.id,
 						RunID:   req.RunID,
 						Payload: map[string]string{"content": chunk.Content},
@@ -502,7 +521,7 @@ func (l *Loop) runLoop(ctx context.Context, req RunRequest) (*RunResult, error) 
 			// Single tool: sequential — no goroutine overhead
 			tc := resp.ToolCalls[0]
 			l.emit(AgentEvent{
-				Type:    "tool.call",
+				Type:    protocol.AgentEventToolCall,
 				AgentID: l.id,
 				RunID:   req.RunID,
 				Payload: map[string]interface{}{"name": tc.Name, "id": tc.ID},
@@ -529,7 +548,7 @@ func (l *Loop) runLoop(ctx context.Context, req RunRequest) (*RunResult, error) 
 			}
 
 			l.emit(AgentEvent{
-				Type:    "tool.result",
+				Type:    protocol.AgentEventToolResult,
 				AgentID: l.id,
 				RunID:   req.RunID,
 				Payload: map[string]interface{}{
@@ -561,7 +580,7 @@ func (l *Loop) runLoop(ctx context.Context, req RunRequest) (*RunResult, error) 
 			// 1. Emit all tool.call events upfront (client sees all calls starting)
 			for _, tc := range resp.ToolCalls {
 				l.emit(AgentEvent{
-					Type:    "tool.call",
+					Type:    protocol.AgentEventToolCall,
 					AgentID: l.id,
 					RunID:   req.RunID,
 					Payload: map[string]interface{}{"name": tc.Name, "id": tc.ID},
@@ -615,7 +634,7 @@ func (l *Loop) runLoop(ctx context.Context, req RunRequest) (*RunResult, error) 
 				}
 
 				l.emit(AgentEvent{
-					Type:    "tool.result",
+					Type:    protocol.AgentEventToolResult,
 					AgentID: l.id,
 					RunID:   req.RunID,
 					Payload: map[string]interface{}{
@@ -668,6 +687,26 @@ func (l *Loop) runLoop(ctx context.Context, req RunRequest) (*RunResult, error) 
 	l.sessions.UpdateMetadata(req.SessionKey, l.model, l.provider.Name(), req.Channel)
 	l.sessions.AccumulateTokens(req.SessionKey, int64(totalUsage.PromptTokens), int64(totalUsage.CompletionTokens))
 	l.sessions.Save(req.SessionKey)
+
+	// Bootstrap auto-cleanup: after enough conversation turns, remove BOOTSTRAP.md
+	// as a safety net in case the LLM didn't clear it itself.
+	// Bootstrap typically completes in 2-3 turns; we auto-cleanup after 3 user messages.
+	// Uses pre-run history (already loaded) + 1 for current message — no extra DB call.
+	if hadBootstrap && l.bootstrapCleanup != nil {
+		userTurns := 1 // current user message
+		for _, m := range history {
+			if m.Role == "user" {
+				userTurns++
+			}
+		}
+		if userTurns >= bootstrapAutoCleanupTurns {
+			if cleanErr := l.bootstrapCleanup(ctx, l.agentUUID, req.UserID); cleanErr != nil {
+				slog.Warn("bootstrap auto-cleanup failed", "error", cleanErr, "agent", l.id, "user", req.UserID)
+			} else {
+				slog.Info("bootstrap auto-cleanup completed", "agent", l.id, "user", req.UserID, "turns", userTurns)
+			}
+		}
+	}
 
 	// If silent, return empty content so gateway suppresses delivery.
 	if isSilent {

@@ -64,10 +64,21 @@ export interface MemoryConfig {
   text_weight?: number;
 }
 
+export interface QualityGateConfig {
+  event: string;
+  type: "agent" | "command";
+  agent?: string;
+  command?: string;
+  block_on_failure: boolean;
+  max_retries?: number;
+  timeout_seconds?: number;
+}
+
 export interface AgentData {
   id: string;
   agent_key: string;
   display_name?: string;
+  frontmatter?: string;
   owner_id: string;
   provider: string;
   model: string;
@@ -98,6 +109,32 @@ export interface AgentShareData {
   role: string;
   granted_by: string;
   created_at?: string;
+}
+
+export interface AgentLinkSettings {
+  require_role?: string;
+  user_allow?: string[];
+  user_deny?: string[];
+}
+
+export interface AgentLinkData {
+  id: string;
+  source_agent_id: string;
+  target_agent_id: string;
+  direction: "outbound" | "inbound" | "bidirectional";
+  team_id?: string;
+  team_name?: string;
+  description?: string;
+  max_concurrent: number;
+  settings?: AgentLinkSettings;
+  status: "active" | "disabled";
+  created_by: string;
+  created_at?: string;
+  updated_at?: string;
+  source_agent_key?: string;
+  target_agent_key?: string;
+  target_display_name?: string;
+  target_description?: string;
 }
 
 export interface AgentInfo {

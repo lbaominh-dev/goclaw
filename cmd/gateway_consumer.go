@@ -41,7 +41,7 @@ func makeSchedulerRunFunc(agents *agent.Router, cfg *config.Config) scheduler.Ru
 // and routes them through the scheduler/agent loop, then publishes the response back.
 // Also handles subagent announcements: routes them through the parent agent's session
 // (matching TS subagent-announce.ts pattern) so the agent can reformulate for the user.
-func consumeInboundMessages(ctx context.Context, msgBus *bus.MessageBus, agents *agent.Router, cfg *config.Config, sched *scheduler.Scheduler, channelMgr *channels.Manager) {
+func consumeInboundMessages(ctx context.Context, msgBus *bus.MessageBus, agents *agent.Router, cfg *config.Config, sched *scheduler.Scheduler, channelMgr *channels.Manager, teamStore store.TeamStore) {
 	slog.Info("inbound message consumer started")
 
 	// Inbound message deduplication (matching TS src/infra/dedupe.ts + inbound-dedupe.ts).
@@ -55,6 +55,15 @@ func consumeInboundMessages(ctx context.Context, msgBus *bus.MessageBus, agents 
 		agentID := msg.AgentID
 		if agentID == "" {
 			agentID = resolveAgentRoute(cfg, msg.Channel, msg.ChatID, msg.PeerKind)
+		}
+
+		// Check handoff routing override (managed mode only)
+		if teamStore != nil && msg.AgentID == "" {
+			if route, _ := teamStore.GetHandoffRoute(ctx, msg.Channel, msg.ChatID); route != nil {
+				agentID = route.ToAgentKey
+				slog.Info("inbound: handoff route active",
+					"channel", msg.Channel, "chat", msg.ChatID, "to", agentID)
+			}
 		}
 
 		if _, err := agents.Get(agentID); err != nil {
@@ -297,7 +306,7 @@ func consumeInboundMessages(ctx context.Context, msgBus *bus.MessageBus, agents 
 			}
 
 			// Schedule through subagent lane
-			outCh := sched.Schedule(ctx, "subagent", agent.RunRequest{
+			outCh := sched.Schedule(ctx, scheduler.LaneSubagent, agent.RunRequest{
 				SessionKey:       sessionKey,
 				Message:          msg.Content,
 				Channel:          origChannel,
@@ -342,6 +351,206 @@ func consumeInboundMessages(ctx context.Context, msgBus *bus.MessageBus, agents 
 			continue
 		}
 
+		// --- Delegate announce: bypass debounce, inject into parent agent session ---
+		// Same pattern as subagent announce above, using "delegate" lane.
+		if msg.Channel == "system" && strings.HasPrefix(msg.SenderID, "delegate:") {
+			origChannel := msg.Metadata["origin_channel"]
+			origPeerKind := msg.Metadata["origin_peer_kind"]
+			parentAgent := msg.Metadata["parent_agent"]
+			if parentAgent == "" {
+				parentAgent = "default"
+			}
+			if origPeerKind == "" {
+				origPeerKind = string(sessions.PeerDirect)
+			}
+
+			if origChannel == "" || msg.ChatID == "" {
+				slog.Warn("delegate announce: missing origin", "sender", msg.SenderID)
+				continue
+			}
+
+			sessionKey := sessions.BuildScopedSessionKey(parentAgent, origChannel, sessions.PeerKind(origPeerKind), msg.ChatID, cfg.Sessions.Scope, cfg.Sessions.DmScope, cfg.Sessions.MainKey)
+
+			slog.Info("delegate announce → scheduler (delegate lane)",
+				"delegation", msg.SenderID,
+				"target", msg.Metadata["target_agent"],
+				"session", sessionKey,
+			)
+
+			announceUserID := msg.UserID
+			if origPeerKind == string(sessions.PeerGroup) && msg.ChatID != "" {
+				announceUserID = fmt.Sprintf("group:%s:%s", origChannel, msg.ChatID)
+			}
+
+			// Extract parent trace context for announce linking (same as subagent announce)
+			var parentTraceID, parentRootSpanID uuid.UUID
+			if tid := msg.Metadata["origin_trace_id"]; tid != "" {
+				parentTraceID, _ = uuid.Parse(tid)
+			}
+			if sid := msg.Metadata["origin_root_span_id"]; sid != "" {
+				parentRootSpanID, _ = uuid.Parse(sid)
+			}
+
+			outCh := sched.Schedule(ctx, scheduler.LaneDelegate, agent.RunRequest{
+				SessionKey:       sessionKey,
+				Message:          msg.Content,
+				Channel:          origChannel,
+				ChatID:           msg.ChatID,
+				PeerKind:         origPeerKind,
+				UserID:           announceUserID,
+				RunID:            fmt.Sprintf("delegate-announce-%s", msg.Metadata["delegation_id"]),
+				Stream:           false,
+				ParentTraceID:    parentTraceID,
+				ParentRootSpanID: parentRootSpanID,
+			})
+
+			go func(origCh, chatID, senderID string) {
+				outcome := <-outCh
+				if outcome.Err != nil {
+					slog.Error("delegate announce: agent run failed", "error", outcome.Err)
+					msgBus.PublishOutbound(bus.OutboundMessage{
+						Channel: origCh,
+						ChatID:  chatID,
+						Content: formatAgentError(outcome.Err),
+					})
+					return
+				}
+				if outcome.Result.Content == "" || agent.IsSilentReply(outcome.Result.Content) {
+					slog.Info("delegate announce: suppressed silent/empty reply", "delegation", senderID)
+					return
+				}
+				msgBus.PublishOutbound(bus.OutboundMessage{
+					Channel: origCh,
+					ChatID:  chatID,
+					Content: outcome.Result.Content,
+				})
+			}(origChannel, msg.ChatID, msg.SenderID)
+			continue
+		}
+
+		// --- Handoff announce: route initial message to target agent session ---
+		// Same pattern as teammate message routing, using "delegate" lane.
+		if msg.Channel == "system" && strings.HasPrefix(msg.SenderID, "handoff:") {
+			origChannel := msg.Metadata["origin_channel"]
+			origPeerKind := msg.Metadata["origin_peer_kind"]
+			targetAgent := msg.AgentID
+			if targetAgent == "" {
+				targetAgent = cfg.ResolveDefaultAgentID()
+			}
+			if origPeerKind == "" {
+				origPeerKind = string(sessions.PeerDirect)
+			}
+
+			if origChannel == "" || msg.ChatID == "" {
+				slog.Warn("handoff announce: missing origin", "sender", msg.SenderID)
+				continue
+			}
+
+			sessionKey := sessions.BuildScopedSessionKey(targetAgent, origChannel, sessions.PeerKind(origPeerKind), msg.ChatID, cfg.Sessions.Scope, cfg.Sessions.DmScope, cfg.Sessions.MainKey)
+
+			slog.Info("handoff announce → scheduler (delegate lane)",
+				"handoff", msg.SenderID,
+				"to", targetAgent,
+				"session", sessionKey,
+			)
+
+			announceUserID := msg.UserID
+			if origPeerKind == string(sessions.PeerGroup) && msg.ChatID != "" {
+				announceUserID = fmt.Sprintf("group:%s:%s", origChannel, msg.ChatID)
+			}
+
+			outCh := sched.Schedule(ctx, scheduler.LaneDelegate, agent.RunRequest{
+				SessionKey: sessionKey,
+				Message:    msg.Content,
+				Channel:    origChannel,
+				ChatID:     msg.ChatID,
+				PeerKind:   origPeerKind,
+				UserID:     announceUserID,
+				RunID:      fmt.Sprintf("handoff-%s", msg.Metadata["handoff_id"]),
+				Stream:     false,
+			})
+
+			go func(origCh, chatID string) {
+				outcome := <-outCh
+				if outcome.Err != nil {
+					slog.Error("handoff announce: agent run failed", "error", outcome.Err)
+					return
+				}
+				if outcome.Result.Content == "" || agent.IsSilentReply(outcome.Result.Content) {
+					return
+				}
+				msgBus.PublishOutbound(bus.OutboundMessage{
+					Channel: origCh,
+					ChatID:  chatID,
+					Content: outcome.Result.Content,
+				})
+			}(origChannel, msg.ChatID)
+			continue
+		}
+
+		// --- Teammate message: bypass debounce, route to target agent session ---
+		// Same pattern as delegate announce, using "delegate" lane.
+		if msg.Channel == "system" && strings.HasPrefix(msg.SenderID, "teammate:") {
+			origChannel := msg.Metadata["origin_channel"]
+			origPeerKind := msg.Metadata["origin_peer_kind"]
+			targetAgent := msg.AgentID // team_message sets AgentID to the target agent key
+			if targetAgent == "" {
+				targetAgent = cfg.ResolveDefaultAgentID()
+			}
+			if origPeerKind == "" {
+				origPeerKind = string(sessions.PeerDirect)
+			}
+
+			if origChannel == "" || msg.ChatID == "" {
+				slog.Warn("teammate message: missing origin", "sender", msg.SenderID)
+				continue
+			}
+
+			sessionKey := sessions.BuildScopedSessionKey(targetAgent, origChannel, sessions.PeerKind(origPeerKind), msg.ChatID, cfg.Sessions.Scope, cfg.Sessions.DmScope, cfg.Sessions.MainKey)
+
+			slog.Info("teammate message → scheduler (delegate lane)",
+				"from", msg.SenderID,
+				"to", targetAgent,
+				"session", sessionKey,
+			)
+
+			announceUserID := msg.UserID
+			if origPeerKind == string(sessions.PeerGroup) && msg.ChatID != "" {
+				announceUserID = fmt.Sprintf("group:%s:%s", origChannel, msg.ChatID)
+			}
+
+			outCh := sched.Schedule(ctx, scheduler.LaneDelegate, agent.RunRequest{
+				SessionKey: sessionKey,
+				Message:    msg.Content,
+				Channel:    origChannel,
+				ChatID:     msg.ChatID,
+				PeerKind:   origPeerKind,
+				UserID:     announceUserID,
+				RunID:      fmt.Sprintf("teammate-%s-%s", msg.Metadata["from_agent"], msg.Metadata["to_agent"]),
+				Stream:     false,
+			})
+
+			go func(origCh, chatID, senderID string) {
+				outcome := <-outCh
+				if outcome.Err != nil {
+					slog.Error("teammate message: agent run failed", "error", outcome.Err)
+					return
+				}
+				if outcome.Result.Content == "" || agent.IsSilentReply(outcome.Result.Content) {
+					slog.Info("teammate message: suppressed silent/empty reply", "from", senderID)
+					return
+				}
+				// Deliver response to origin channel (same as delegate/subagent announce).
+				// This allows the lead to respond to users after receiving teammate updates.
+				msgBus.PublishOutbound(bus.OutboundMessage{
+					Channel: origCh,
+					ChatID:  chatID,
+					Content: outcome.Result.Content,
+				})
+			}(origChannel, msg.ChatID, msg.SenderID)
+			continue
+		}
+
 		// --- Command: /stop — cancel oldest active run for this session ---
 		// --- Command: /stopall — cancel ALL active runs + drain queue ---
 		if cmd := msg.Metadata["command"]; cmd == "stop" || cmd == "stopall" {
@@ -370,6 +579,28 @@ func consumeInboundMessages(ctx context.Context, msgBus *bus.MessageBus, agents 
 				cancelled = sched.CancelOneSession(sessionKey)
 				slog.Info("inbound: /stop command", "session", sessionKey, "cancelled", cancelled)
 			}
+
+			// Publish feedback so the channel can show the result.
+			var feedback string
+			if cancelled {
+				if cmd == "stopall" {
+					feedback = "All tasks stopped."
+				} else {
+					feedback = "Task stopped."
+				}
+			} else {
+				if cmd == "stopall" {
+					feedback = "No active tasks to stop."
+				} else {
+					feedback = "No active task to stop."
+				}
+			}
+			msgBus.PublishOutbound(bus.OutboundMessage{
+				Channel:  msg.Channel,
+				ChatID:   msg.ChatID,
+				Content:  feedback,
+				Metadata: msg.Metadata,
+			})
 			continue
 		}
 

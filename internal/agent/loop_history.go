@@ -13,7 +13,10 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/providers"
 )
 
-func (l *Loop) buildMessages(ctx context.Context, history []providers.Message, summary, userMessage, extraSystemPrompt, sessionKey, channel, userID string, historyLimit int) []providers.Message {
+// buildMessages constructs the full message list for an LLM request.
+// Returns the messages and whether BOOTSTRAP.md was present in context files
+// (used by the caller for auto-cleanup without an extra DB roundtrip).
+func (l *Loop) buildMessages(ctx context.Context, history []providers.Message, summary, userMessage, extraSystemPrompt, sessionKey, channel, userID string, historyLimit int) ([]providers.Message, bool) {
 	var messages []providers.Message
 
 	// Build full system prompt using the new builder (matching TS buildAgentSystemPrompt)
@@ -31,6 +34,16 @@ func (l *Loop) buildMessages(ctx context.Context, history []providers.Message, s
 		promptWorkspace = filepath.Join(l.workspace, sanitizePathSegment(userID))
 	}
 
+	// Resolve context files once — also detect BOOTSTRAP.md presence.
+	contextFiles := l.resolveContextFiles(ctx, userID)
+	hadBootstrap := false
+	for _, cf := range contextFiles {
+		if cf.Path == bootstrap.BootstrapFile {
+			hadBootstrap = true
+			break
+		}
+	}
+
 	systemPrompt := BuildSystemPrompt(SystemPromptConfig{
 		AgentID:        l.id,
 		Model:          l.model,
@@ -43,7 +56,7 @@ func (l *Loop) buildMessages(ctx context.Context, history []providers.Message, s
 		HasMemory:      l.hasMemory,
 		HasSpawn:       l.tools != nil && hasSpawn,
 		HasSkillSearch: hasSkillSearch,
-		ContextFiles:   l.resolveContextFiles(ctx, userID),
+		ContextFiles:   contextFiles,
 		ExtraPrompt:    extraSystemPrompt,
 		SandboxEnabled:        l.sandboxEnabled,
 		SandboxContainerDir:   l.sandboxContainerDir,
@@ -78,18 +91,37 @@ func (l *Loop) buildMessages(ctx context.Context, history []providers.Message, s
 		Content: userMessage,
 	})
 
-	return messages
+	return messages, hadBootstrap
 }
 
-// resolveContextFiles returns per-user context files if available (managed mode),
-// falling back to the static contextFiles loaded at Loop creation.
+// resolveContextFiles merges base context files (from resolver, e.g. auto-generated
+// delegation targets) with per-user files. Per-user files override same-name base files,
+// but base-only files (like auto-injected delegation info) are preserved.
 func (l *Loop) resolveContextFiles(ctx context.Context, userID string) []bootstrap.ContextFile {
-	if l.contextFileLoader != nil && userID != "" {
-		if files := l.contextFileLoader(ctx, l.agentUUID, userID, l.agentType); len(files) > 0 {
-			return files
+	if l.contextFileLoader == nil || userID == "" {
+		return l.contextFiles
+	}
+	userFiles := l.contextFileLoader(ctx, l.agentUUID, userID, l.agentType)
+	if len(userFiles) == 0 {
+		return l.contextFiles
+	}
+	if len(l.contextFiles) == 0 {
+		return userFiles
+	}
+
+	// Merge: start with per-user files, then append base-only files
+	userSet := make(map[string]struct{}, len(userFiles))
+	for _, f := range userFiles {
+		userSet[f.Path] = struct{}{}
+	}
+	merged := make([]bootstrap.ContextFile, len(userFiles))
+	copy(merged, userFiles)
+	for _, base := range l.contextFiles {
+		if _, exists := userSet[base.Path]; !exists {
+			merged = append(merged, base)
 		}
 	}
-	return l.contextFiles
+	return merged
 }
 
 // Hybrid skill thresholds: when skill count and total token estimate are below

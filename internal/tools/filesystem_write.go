@@ -13,9 +13,15 @@ import (
 type WriteFileTool struct {
 	workspace       string
 	restrict        bool
+	deniedPrefixes  []string // path prefixes to deny access to (e.g. .goclaw)
 	sandboxMgr      sandbox.Manager
 	contextFileIntc *ContextFileInterceptor // nil = no virtual FS routing (standalone mode)
 	memIntc         *MemoryInterceptor      // nil = no memory routing (standalone mode)
+}
+
+// DenyPaths adds path prefixes that write_file must reject.
+func (t *WriteFileTool) DenyPaths(prefixes ...string) {
+	t.deniedPrefixes = append(t.deniedPrefixes, prefixes...)
 }
 
 // SetContextFileInterceptor enables virtual FS routing for context files (managed mode).
@@ -98,6 +104,9 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]interface{}
 	}
 	resolved, err := resolvePath(path, workspace, t.restrict)
 	if err != nil {
+		return ErrorResult(err.Error())
+	}
+	if err := checkDeniedPath(resolved, t.workspace, t.deniedPrefixes); err != nil {
 		return ErrorResult(err.Error())
 	}
 

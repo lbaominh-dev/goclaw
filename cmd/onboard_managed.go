@@ -46,6 +46,12 @@ func seedManagedData(dsn string, cfg *config.Config) error {
 
 	ctx := context.Background()
 
+	// Resolve owner: use first GOCLAW_OWNER_IDS entry if set, otherwise "system".
+	ownerID := "system"
+	if len(cfg.Gateway.OwnerIDs) > 0 && cfg.Gateway.OwnerIDs[0] != "" {
+		ownerID = cfg.Gateway.OwnerIDs[0]
+	}
+
 	defaultProvider := cfg.Agents.Defaults.Provider
 	if defaultProvider == "" {
 		defaultProvider = "openrouter"
@@ -114,14 +120,14 @@ func seedManagedData(dsn string, cfg *config.Config) error {
 	agent := &store.AgentData{
 		AgentKey:            "default",
 		DisplayName:         "Default Agent",
-		OwnerID:             "system",
-		AgentType:           "open",
+		OwnerID:             ownerID,
+		AgentType:           store.AgentTypeOpen,
 		Provider:            defaultProvider,
 		Model:               modelID,
 		Workspace:           workspace,
 		RestrictToWorkspace: true,
 		IsDefault:           true,
-		Status:              "active",
+		Status:              store.AgentStatusActive,
 		SubagentsConfig:     json.RawMessage(`{"maxSpawnDepth":1,"maxConcurrent":20}`),
 	}
 
@@ -137,7 +143,7 @@ func seedManagedData(dsn string, cfg *config.Config) error {
 	}
 
 	// 6. Seed channel instances from env vars (if set)
-	seedChannelInstances(ctx, stores, cfg, agent.ID)
+	seedChannelInstances(ctx, stores, cfg, agent.ID, ownerID)
 
 	// 7. Seed config_secrets from env vars
 	seedConfigSecrets(ctx, stores, cfg)
@@ -147,7 +153,7 @@ func seedManagedData(dsn string, cfg *config.Config) error {
 
 // seedChannelInstances creates channel_instances rows from env-var-provided credentials.
 // Idempotent: skips if an instance with the same name already exists.
-func seedChannelInstances(ctx context.Context, stores *store.Stores, cfg *config.Config, defaultAgentID uuid.UUID) {
+func seedChannelInstances(ctx context.Context, stores *store.Stores, cfg *config.Config, defaultAgentID uuid.UUID, ownerID string) {
 	if stores.ChannelInstances == nil {
 		return
 	}
@@ -240,7 +246,7 @@ func seedChannelInstances(ctx context.Context, stores *store.Stores, cfg *config
 			Credentials: credsJSON,
 			Config:      cfgJSON,
 			Enabled:     true,
-			CreatedBy:   "system",
+			CreatedBy:   ownerID,
 		}
 
 		if err := stores.ChannelInstances.Create(ctx, inst); err != nil {

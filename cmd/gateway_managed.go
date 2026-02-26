@@ -3,14 +3,13 @@ package cmd
 import (
 	"context"
 	"log/slog"
-	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/nextlevelbuilder/goclaw/internal/agent"
-	"github.com/nextlevelbuilder/goclaw/internal/bootstrap"
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/config"
+	"github.com/nextlevelbuilder/goclaw/internal/hooks"
 	httpapi "github.com/nextlevelbuilder/goclaw/internal/http"
 	"github.com/nextlevelbuilder/goclaw/internal/providers"
 	"github.com/nextlevelbuilder/goclaw/internal/sandbox"
@@ -52,44 +51,13 @@ func wireManagedExtras(
 	// 2. User seeding callback: seeds per-user context files on first chat
 	var ensureUserFiles agent.EnsureUserFilesFunc
 	if stores.Agents != nil {
-		as := stores.Agents
-		ensureUserFiles = func(ctx context.Context, agentID uuid.UUID, userID, agentType, workspace string) error {
-			isNew, err := as.GetOrCreateUserProfile(ctx, agentID, userID, workspace)
-			if err != nil {
-				return err
-			}
-			if !isNew {
-				return nil // already profiled = already seeded
-			}
-
-			// Auto-add first group member as a file writer (bootstrap the allowlist).
-			if strings.HasPrefix(userID, "group:") {
-				senderID := store.SenderIDFromContext(ctx)
-				if senderID != "" {
-					parts := strings.SplitN(senderID, "|", 2)
-					numericID := parts[0]
-					senderUsername := ""
-					if len(parts) > 1 {
-						senderUsername = parts[1]
-					}
-					if addErr := as.AddGroupFileWriter(ctx, agentID, userID, numericID, "", senderUsername); addErr != nil {
-						slog.Warn("failed to auto-add group file writer", "error", addErr, "sender", numericID, "group", userID)
-					}
-				}
-			}
-
-			_, err = bootstrap.SeedUserFiles(ctx, as, agentID, userID, agentType)
-			return err
-		}
+		ensureUserFiles = buildEnsureUserFiles(stores.Agents)
 	}
 
 	// 3. Context file loader callback: loads per-user context files dynamically
 	var contextFileLoader agent.ContextFileLoaderFunc
 	if contextFileInterceptor != nil {
-		intc := contextFileInterceptor
-		contextFileLoader = func(ctx context.Context, agentID uuid.UUID, userID, agentType string) []bootstrap.ContextFile {
-			return intc.LoadContextFiles(ctx, agentID, userID, agentType)
-		}
+		contextFileLoader = buildContextFileLoader(contextFileInterceptor)
 	}
 
 	// 4. Compute global sandbox defaults for resolver
@@ -118,6 +86,7 @@ func wireManagedExtras(
 		TraceCollector:    traceCollector,
 		EnsureUserFiles:   ensureUserFiles,
 		ContextFileLoader: contextFileLoader,
+		BootstrapCleanup:  buildBootstrapCleanup(stores.Agents),
 		InjectionAction:   injectionAction,
 		MaxMessageChars:        appCfg.Gateway.MaxMessageChars,
 		CompactionCfg:          appCfg.Agents.Defaults.Compaction,
@@ -126,6 +95,8 @@ func wireManagedExtras(
 		SandboxContainerDir:    sandboxContainerDir,
 		SandboxWorkspaceAccess: sandboxWorkspaceAccess,
 		DynamicLoader:          dynamicLoader,
+		AgentLinkStore:         stores.AgentLinks,
+		TeamStore:              stores.Teams,
 		OnEvent: func(event agent.AgentEvent) {
 			msgBus.Broadcast(bus.Event{
 				Name:    protocol.EventAgent,
@@ -267,11 +238,100 @@ func wireManagedExtras(
 		})
 	}
 
+	// Register delegate tool (inter-agent delegation) if link store is available.
+	// Uses a callback to bridge tools.DelegateRunRequest → agent.RunRequest,
+	// avoiding import cycle between tools and agent packages.
+	if stores.AgentLinks != nil && stores.Agents != nil {
+		runAgentFn := func(ctx context.Context, agentKey string, req tools.DelegateRunRequest) (*tools.DelegateRunResult, error) {
+			loop, err := agentRouter.Get(agentKey)
+			if err != nil {
+				return nil, err
+			}
+			result, err := loop.Run(ctx, agent.RunRequest{
+				SessionKey:        req.SessionKey,
+				Message:           req.Message,
+				UserID:            req.UserID,
+				Channel:           req.Channel,
+				ChatID:            req.ChatID,
+				PeerKind:          req.PeerKind,
+				RunID:             req.RunID,
+				Stream:            req.Stream,
+				ExtraSystemPrompt: req.ExtraSystemPrompt,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return &tools.DelegateRunResult{
+				Content:    result.Content,
+				Iterations: result.Iterations,
+			}, nil
+		}
+		delegateMgr := tools.NewDelegateManager(runAgentFn, stores.AgentLinks, stores.Agents, msgBus)
+		if stores.Teams != nil {
+			delegateMgr.SetTeamStore(stores.Teams)
+		}
+		delegateMgr.SetSessionStore(stores.Sessions)
+
+		// Hook engine (quality gates)
+		hookEngine := hooks.NewEngine()
+		hookEngine.RegisterEvaluator(hooks.HookTypeCommand, hooks.NewCommandEvaluator(workspace))
+		agentEvalFn := func(ctx context.Context, agentKey, task string) (string, error) {
+			result, err := delegateMgr.Delegate(hooks.WithSkipHooks(ctx, true), tools.DelegateOpts{
+				TargetAgentKey: agentKey, Task: task, Mode: "sync",
+			})
+			if err != nil {
+				return "", err
+			}
+			return result.Content, nil
+		}
+		hookEngine.RegisterEvaluator(hooks.HookTypeAgent, hooks.NewAgentEvaluator(agentEvalFn))
+		delegateMgr.SetHookEngine(hookEngine)
+
+		// Evaluate-optimize loop tool
+		toolsReg.Register(tools.NewEvaluateLoopTool(delegateMgr))
+
+		// Handoff tool (agent-to-agent conversation transfer)
+		toolsReg.Register(tools.NewHandoffTool(delegateMgr, stores.Teams, stores.Sessions, msgBus))
+
+		toolsReg.Register(tools.NewDelegateTool(delegateMgr))
+
+		// Register delegate_search tool (hybrid FTS + semantic agent discovery)
+		var delegateEmbProvider store.EmbeddingProvider
+		if agentStore, ok := stores.Agents.(*pg.PGAgentStore); ok {
+			memCfg := appCfg.Agents.Defaults.Memory
+			if embProvider := resolveEmbeddingProvider(appCfg, memCfg); embProvider != nil {
+				agentStore.SetEmbeddingProvider(embProvider)
+				delegateEmbProvider = embProvider
+				slog.Info("managed mode: agent embeddings enabled")
+
+				// Backfill embeddings for existing agents with frontmatter
+				go func() {
+					count, err := agentStore.BackfillAgentEmbeddings(context.Background())
+					if err != nil {
+						slog.Warn("agent embeddings backfill failed", "error", err)
+					} else if count > 0 {
+						slog.Info("agent embeddings backfill complete", "updated", count)
+					}
+				}()
+			}
+		}
+		toolsReg.Register(tools.NewDelegateSearchTool(stores.AgentLinks, delegateEmbProvider))
+		slog.Info("managed mode: delegate + delegate_search tools registered")
+	}
+
+	// Register team tools (team_tasks + team_message) if team store is available.
+	if stores.Teams != nil && stores.Agents != nil {
+		teamMgr := tools.NewTeamToolManager(stores.Teams, stores.Agents, msgBus)
+		toolsReg.Register(tools.NewTeamTasksTool(teamMgr))
+		toolsReg.Register(tools.NewTeamMessageTool(teamMgr))
+		slog.Info("managed mode: team tools registered")
+	}
+
 	slog.Info("managed mode: resolver + interceptors + cache subscribers wired")
 }
 
-// wireManagedHTTP creates managed-mode HTTP handlers (agents + skills + traces + MCP + custom tools + channel instances + providers).
-func wireManagedHTTP(stores *store.Stores, token string, msgBus *bus.MessageBus, toolsReg *tools.Registry, providerReg *providers.Registry) (*httpapi.AgentsHandler, *httpapi.SkillsHandler, *httpapi.TracesHandler, *httpapi.MCPHandler, *httpapi.CustomToolsHandler, *httpapi.ChannelInstancesHandler, *httpapi.ProvidersHandler) {
+// wireManagedHTTP creates managed-mode HTTP handlers (agents + skills + traces + MCP + custom tools + channel instances + providers + delegations).
+func wireManagedHTTP(stores *store.Stores, token string, msgBus *bus.MessageBus, toolsReg *tools.Registry, providerReg *providers.Registry, isOwner func(string) bool) (*httpapi.AgentsHandler, *httpapi.SkillsHandler, *httpapi.TracesHandler, *httpapi.MCPHandler, *httpapi.CustomToolsHandler, *httpapi.ChannelInstancesHandler, *httpapi.ProvidersHandler, *httpapi.DelegationsHandler) {
 	var agentsH *httpapi.AgentsHandler
 	var skillsH *httpapi.SkillsHandler
 	var tracesH *httpapi.TracesHandler
@@ -279,13 +339,14 @@ func wireManagedHTTP(stores *store.Stores, token string, msgBus *bus.MessageBus,
 	var customToolsH *httpapi.CustomToolsHandler
 	var channelInstancesH *httpapi.ChannelInstancesHandler
 	var providersH *httpapi.ProvidersHandler
+	var delegationsH *httpapi.DelegationsHandler
 
 	if stores != nil && stores.Agents != nil {
 		var summoner *httpapi.AgentSummoner
 		if providerReg != nil {
 			summoner = httpapi.NewAgentSummoner(stores.Agents, providerReg, msgBus)
 		}
-		agentsH = httpapi.NewAgentsHandler(stores.Agents, token, msgBus, summoner)
+		agentsH = httpapi.NewAgentsHandler(stores.Agents, token, msgBus, summoner, isOwner)
 	}
 
 	if stores != nil && stores.Skills != nil {
@@ -317,5 +378,9 @@ func wireManagedHTTP(stores *store.Stores, token string, msgBus *bus.MessageBus,
 		providersH = httpapi.NewProvidersHandler(stores.Providers, token, providerReg)
 	}
 
-	return agentsH, skillsH, tracesH, mcpH, customToolsH, channelInstancesH, providersH
+	if stores != nil && stores.Teams != nil {
+		delegationsH = httpapi.NewDelegationsHandler(stores.Teams, token)
+	}
+
+	return agentsH, skillsH, tracesH, mcpH, customToolsH, channelInstancesH, providersH, delegationsH
 }

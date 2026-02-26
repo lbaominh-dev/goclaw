@@ -99,7 +99,7 @@ export function ProvidersSection({ data, onSave, saving }: Props) {
               <div key={p.key} className="rounded-md border">
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-muted/50"
+                  className="flex w-full cursor-pointer items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-muted/50"
                   onClick={() => toggle(p.key)}
                 >
                   {isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}

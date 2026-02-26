@@ -3,6 +3,7 @@ import { useHttp } from "@/hooks/use-ws";
 
 export interface TraceData {
   id: string;
+  parent_trace_id?: string;
   agent_id?: string;
   user_id: string;
   session_key: string;
@@ -23,6 +24,7 @@ export interface TraceData {
   status: string;
   error?: string;
   tags?: string[];
+  metadata?: { total_cache_read_tokens?: number; total_cache_creation_tokens?: number };
   created_at: string;
 }
 
@@ -48,6 +50,7 @@ export interface SpanData {
   tool_call_id: string;
   input_preview: string;
   output_preview: string;
+  metadata?: { cache_creation_tokens?: number; cache_read_tokens?: number };
 }
 
 interface TraceFilters {

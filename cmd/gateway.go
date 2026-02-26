@@ -520,6 +520,20 @@ func runGateway() {
 		}
 	}
 
+	// Standalone mode: wire FileAgentStore + interceptors + callbacks.
+	// Must happen after tool registration (wires interceptors to read_file, write_file, edit).
+	var fileAgentStore store.AgentStore
+	var ensureUserFiles agent.EnsureUserFilesFunc
+	var contextFileLoader agent.ContextFileLoaderFunc
+	if cfg.Database.Mode != "managed" {
+		var standaloneCleanup func()
+		fileAgentStore, ensureUserFiles, contextFileLoader, standaloneCleanup =
+			wireStandaloneExtras(cfg, toolsReg, dataDir, workspace)
+		if standaloneCleanup != nil {
+			defer standaloneCleanup()
+		}
+	}
+
 	// Create all agents
 	agentRouter := agent.NewRouter()
 
@@ -529,7 +543,7 @@ func runGateway() {
 	// In standalone mode, create agents eagerly from config.
 	if !isManaged {
 		// Always create "default" agent
-		if err := createAgentLoop("default", cfg, agentRouter, providerRegistry, msgBus, sessStore, toolsReg, toolPE, contextFiles, skillsLoader, hasMemory, sandboxMgr); err != nil {
+		if err := createAgentLoop("default", cfg, agentRouter, providerRegistry, msgBus, sessStore, toolsReg, toolPE, contextFiles, skillsLoader, hasMemory, sandboxMgr, fileAgentStore, ensureUserFiles, contextFileLoader); err != nil {
 			slog.Error("failed to create default agent", "error", err)
 			os.Exit(1)
 		}
@@ -539,7 +553,7 @@ func runGateway() {
 			if agentID == "default" {
 				continue
 			}
-			if err := createAgentLoop(agentID, cfg, agentRouter, providerRegistry, msgBus, sessStore, toolsReg, toolPE, contextFiles, skillsLoader, hasMemory, sandboxMgr); err != nil {
+			if err := createAgentLoop(agentID, cfg, agentRouter, providerRegistry, msgBus, sessStore, toolsReg, toolPE, contextFiles, skillsLoader, hasMemory, sandboxMgr, fileAgentStore, ensureUserFiles, contextFileLoader); err != nil {
 				slog.Error("failed to create agent", "agent", agentID, "error", err)
 			}
 		}
@@ -567,7 +581,7 @@ func runGateway() {
 		}
 
 		wireManagedExtras(managedStores, agentRouter, providerRegistry, msgBus, sessStore, toolsReg, toolPE, skillsLoader, hasMemory, traceCollector, workspace, cfg.Gateway.InjectionAction, cfg, sandboxMgr, dynamicLoader)
-		agentsH, skillsH, tracesH, mcpH, customToolsH, channelInstancesH, providersH := wireManagedHTTP(managedStores, cfg.Gateway.Token, msgBus, toolsReg, providerRegistry)
+		agentsH, skillsH, tracesH, mcpH, customToolsH, channelInstancesH, providersH, delegationsH := wireManagedHTTP(managedStores, cfg.Gateway.Token, msgBus, toolsReg, providerRegistry, permPE.IsOwner)
 		if agentsH != nil {
 			server.SetAgentsHandler(agentsH)
 		}
@@ -588,6 +602,9 @@ func runGateway() {
 		}
 		if providersH != nil {
 			server.SetProvidersHandler(providersH)
+		}
+		if delegationsH != nil {
+			server.SetDelegationsHandler(delegationsH)
 		}
 	}
 
@@ -610,7 +627,12 @@ func runGateway() {
 		configSecretsStore = managedStores.ConfigSecrets
 	}
 
-	pairingMethods := registerAllMethods(server, agentRouter, sessStore, cronStore, pairingStore, cfg, cfgPath, workspace, dataDir, msgBus, execApprovalMgr, agentStoreForRPC, isManaged, skillStore, configSecretsStore)
+	var teamStoreForRPC store.TeamStore
+	if managedStores != nil {
+		teamStoreForRPC = managedStores.Teams
+	}
+
+	pairingMethods := registerAllMethods(server, agentRouter, sessStore, cronStore, pairingStore, cfg, cfgPath, workspace, dataDir, msgBus, execApprovalMgr, agentStoreForRPC, isManaged, skillStore, configSecretsStore, teamStoreForRPC)
 
 	// Channel manager
 	channelMgr := channels.NewManager(msgBus)
@@ -626,7 +648,7 @@ func runGateway() {
 	var instanceLoader *channels.InstanceLoader
 	if managedStores != nil && managedStores.ChannelInstances != nil {
 		instanceLoader = channels.NewInstanceLoader(managedStores.ChannelInstances, managedStores.Agents, channelMgr, msgBus, pairingStore)
-		instanceLoader.RegisterFactory("telegram", telegram.FactoryWithAgentStore(managedStores.Agents))
+		instanceLoader.RegisterFactory("telegram", telegram.FactoryWithStores(managedStores.Agents, managedStores.Teams))
 		instanceLoader.RegisterFactory("discord", discord.Factory)
 		instanceLoader.RegisterFactory("feishu", feishu.Factory)
 		instanceLoader.RegisterFactory("zalo_oa", zalo.Factory)
@@ -639,7 +661,7 @@ func runGateway() {
 	// Register config-based channels as fallback (standalone mode only).
 	// In managed mode, channels are loaded from DB via instanceLoader — skip config-based registration.
 	if cfg.Channels.Telegram.Enabled && cfg.Channels.Telegram.Token != "" && instanceLoader == nil {
-		tg, err := telegram.New(cfg.Channels.Telegram, msgBus, pairingStore, nil)
+		tg, err := telegram.New(cfg.Channels.Telegram, msgBus, pairingStore, nil, nil)
 		if err != nil {
 			slog.Error("failed to initialize telegram channel", "error", err)
 		} else {
@@ -694,6 +716,16 @@ func runGateway() {
 	// Register channel instances WS RPC methods (managed mode only)
 	if managedStores != nil && managedStores.ChannelInstances != nil {
 		methods.NewChannelInstancesMethods(managedStores.ChannelInstances, msgBus).Register(server.Router())
+	}
+
+	// Register agent links WS RPC methods (managed mode only)
+	if managedStores != nil && managedStores.AgentLinks != nil && managedStores.Agents != nil {
+		methods.NewAgentLinksMethods(managedStores.AgentLinks, managedStores.Agents, agentRouter).Register(server.Router())
+	}
+
+	// Register agent teams WS RPC methods (managed mode only)
+	if managedStores != nil && managedStores.Teams != nil {
+		methods.NewTeamsMethods(managedStores.Teams, managedStores.Agents, managedStores.AgentLinks, agentRouter).Register(server.Router())
 	}
 
 	// Cache invalidation: reload channel instances on changes.
@@ -788,7 +820,11 @@ func runGateway() {
 	})
 
 	// Start inbound message consumer (channel → scheduler → agent → channel)
-	go consumeInboundMessages(ctx, msgBus, agentRouter, cfg, sched, channelMgr)
+	var consumerTeamStore store.TeamStore
+	if managedStores != nil {
+		consumerTeamStore = managedStores.Teams
+	}
+	go consumeInboundMessages(ctx, msgBus, agentRouter, cfg, sched, channelMgr, consumerTeamStore)
 
 	go func() {
 		sig := <-sigCh

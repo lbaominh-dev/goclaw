@@ -8,9 +8,39 @@ import (
 	"github.com/google/uuid"
 )
 
+// Trace status constants.
+const (
+	TraceStatusRunning   = "running"
+	TraceStatusCompleted = "completed"
+	TraceStatusError     = "error"
+	TraceStatusCancelled = "cancelled"
+)
+
+// Span type constants.
+const (
+	SpanTypeLLMCall   = "llm_call"
+	SpanTypeToolCall  = "tool_call"
+	SpanTypeAgent     = "agent"
+	SpanTypeEmbedding = "embedding"
+	SpanTypeEvent     = "event"
+)
+
+// Span status constants.
+const (
+	SpanStatusCompleted = "completed"
+	SpanStatusError     = "error"
+	SpanStatusRunning   = "running"
+)
+
+// Span level constants.
+const (
+	SpanLevelDefault = "DEFAULT"
+)
+
 // TraceData represents a top-level trace (one per user request).
 type TraceData struct {
 	ID                uuid.UUID       `json:"id"`
+	ParentTraceID     *uuid.UUID      `json:"parent_trace_id,omitempty"` // linked parent trace (delegation)
 	AgentID           *uuid.UUID      `json:"agent_id,omitempty"`
 	UserID            string          `json:"user_id,omitempty"`
 	SessionKey        string          `json:"session_key,omitempty"`

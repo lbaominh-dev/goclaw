@@ -9,10 +9,11 @@ import (
 type contextKey string
 
 const (
-	traceIDKey         contextKey = "goclaw_trace_id"
-	parentSpanKey      contextKey = "goclaw_parent_span_id"
-	collectorKey       contextKey = "goclaw_trace_collector"
-	announceParentKey  contextKey = "goclaw_announce_parent_span_id"
+	traceIDKey              contextKey = "goclaw_trace_id"
+	parentSpanKey           contextKey = "goclaw_parent_span_id"
+	collectorKey            contextKey = "goclaw_trace_collector"
+	announceParentKey       contextKey = "goclaw_announce_parent_span_id"
+	delegateParentTraceKey  contextKey = "goclaw_delegate_parent_trace_id"
 )
 
 // WithTraceID returns a context with the given trace ID.
@@ -64,6 +65,21 @@ func WithAnnounceParentSpanID(ctx context.Context, id uuid.UUID) context.Context
 // Returns uuid.Nil if not set (i.e., this is a normal run, not an announce).
 func AnnounceParentSpanIDFromContext(ctx context.Context) uuid.UUID {
 	if v, ok := ctx.Value(announceParentKey).(uuid.UUID); ok {
+		return v
+	}
+	return uuid.Nil
+}
+
+// WithDelegateParentTraceID sets the parent trace ID for delegation linking.
+// Unlike ParentTraceID on RunRequest (which reuses the parent trace for announces),
+// this creates a NEW trace that links back to the parent via parent_trace_id.
+func WithDelegateParentTraceID(ctx context.Context, id uuid.UUID) context.Context {
+	return context.WithValue(ctx, delegateParentTraceKey, id)
+}
+
+// DelegateParentTraceIDFromContext extracts the delegation parent trace ID.
+func DelegateParentTraceIDFromContext(ctx context.Context) uuid.UUID {
+	if v, ok := ctx.Value(delegateParentTraceKey).(uuid.UUID); ok {
 		return v
 	}
 	return uuid.Nil

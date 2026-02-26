@@ -23,6 +23,9 @@ const (
 	// Agent summoning events (predefined agent setup via LLM).
 	EventAgentSummoning = "agent.summoning"
 
+	// Agent handoff event (payload: from_agent, to_agent, reason).
+	EventHandoff = "handoff"
+
 	// Cache invalidation events (internal, not forwarded to WS clients).
 	EventCacheInvalidate = "cache.invalidate"
 )

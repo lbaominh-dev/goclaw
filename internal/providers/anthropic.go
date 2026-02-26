@@ -116,12 +116,14 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest, onC
 		case "message_start":
 			var ev anthropicMessageStartEvent
 			if err := json.Unmarshal([]byte(data), &ev); err == nil {
+				if result.Usage == nil {
+					result.Usage = &Usage{}
+				}
 				if ev.Message.Usage.InputTokens > 0 {
-					if result.Usage == nil {
-						result.Usage = &Usage{}
-					}
 					result.Usage.PromptTokens = ev.Message.Usage.InputTokens
 				}
+				result.Usage.CacheCreationTokens = ev.Message.Usage.CacheCreationInputTokens
+				result.Usage.CacheReadTokens = ev.Message.Usage.CacheReadInputTokens
 			}
 
 		case "content_block_start":
@@ -259,9 +261,10 @@ func (p *AnthropicProvider) buildRequestBody(model string, req ChatRequest, stre
 	}
 
 	body := map[string]interface{}{
-		"model":      model,
-		"max_tokens": 4096,
-		"messages":   messages,
+		"model":         model,
+		"max_tokens":    4096,
+		"messages":      messages,
+		"cache_control": map[string]interface{}{"type": "ephemeral"},
 	}
 
 	if stream {
@@ -360,9 +363,11 @@ func (p *AnthropicProvider) parseResponse(resp *anthropicResponse) *ChatResponse
 	}
 
 	result.Usage = &Usage{
-		PromptTokens:     resp.Usage.InputTokens,
-		CompletionTokens: resp.Usage.OutputTokens,
-		TotalTokens:      resp.Usage.InputTokens + resp.Usage.OutputTokens,
+		PromptTokens:        resp.Usage.InputTokens,
+		CompletionTokens:    resp.Usage.OutputTokens,
+		TotalTokens:         resp.Usage.InputTokens + resp.Usage.OutputTokens,
+		CacheCreationTokens: resp.Usage.CacheCreationInputTokens,
+		CacheReadTokens:     resp.Usage.CacheReadInputTokens,
 	}
 
 	return result
@@ -385,8 +390,10 @@ type anthropicContentBlock struct {
 }
 
 type anthropicUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 }
 
 // --- Streaming event types ---

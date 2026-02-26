@@ -25,6 +25,7 @@ type Channel struct {
 	config           config.TelegramConfig
 	pairingService   store.PairingStore
 	agentStore       store.AgentStore // for group file writer management (nil in standalone)
+	teamStore        store.TeamStore  // for /tasks, /task_detail commands (nil in standalone)
 	placeholders     sync.Map         // localKey string → messageID int
 	stopThinking     sync.Map         // localKey string → *thinkingCancel
 	streams          sync.Map         // localKey string → *DraftStream (streaming preview)
@@ -52,7 +53,8 @@ func (c *thinkingCancel) Cancel() {
 // New creates a new Telegram channel from config.
 // pairingSvc is optional (nil = fall back to allowlist only).
 // agentStore is optional (nil = group file writer commands disabled).
-func New(cfg config.TelegramConfig, msgBus *bus.MessageBus, pairingSvc store.PairingStore, agentStore store.AgentStore) (*Channel, error) {
+// teamStore is optional (nil = /tasks, /task_detail commands disabled).
+func New(cfg config.TelegramConfig, msgBus *bus.MessageBus, pairingSvc store.PairingStore, agentStore store.AgentStore, teamStore store.TeamStore) (*Channel, error) {
 	var opts []telego.BotOption
 
 	if cfg.Proxy != "" {
@@ -90,6 +92,7 @@ func New(cfg config.TelegramConfig, msgBus *bus.MessageBus, pairingSvc store.Pai
 		config:         cfg,
 		pairingService: pairingSvc,
 		agentStore:     agentStore,
+		teamStore:      teamStore,
 		groupHistory:   channels.NewPendingHistory(),
 		historyLimit:   historyLimit,
 		requireMention: requireMention,
@@ -156,6 +159,8 @@ func (c *Channel) Start(ctx context.Context) error {
 				}
 				if update.Message != nil {
 					c.handleMessage(pollCtx, update)
+				} else if update.CallbackQuery != nil {
+					c.handleCallbackQuery(pollCtx, update.CallbackQuery)
 				} else {
 					// Log non-message updates for delivery diagnostics
 					updateType := "unknown"
@@ -164,8 +169,6 @@ func (c *Channel) Start(ctx context.Context) error {
 						updateType = "edited_message"
 					case update.ChannelPost != nil:
 						updateType = "channel_post"
-					case update.CallbackQuery != nil:
-						updateType = "callback_query"
 					case update.MyChatMember != nil:
 						updateType = "my_chat_member"
 					case update.ChatMember != nil:

@@ -12,7 +12,7 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/tools"
 )
 
-func registerAllMethods(server *gateway.Server, agents *agent.Router, sessStore store.SessionStore, cronStore store.CronStore, pairingStore store.PairingStore, cfg *config.Config, cfgPath, workspace, dataDir string, msgBus *bus.MessageBus, execApprovalMgr *tools.ExecApprovalManager, agentStore store.AgentStore, isManaged bool, skillStore store.SkillStore, configSecretsStore store.ConfigSecretsStore) *methods.PairingMethods {
+func registerAllMethods(server *gateway.Server, agents *agent.Router, sessStore store.SessionStore, cronStore store.CronStore, pairingStore store.PairingStore, cfg *config.Config, cfgPath, workspace, dataDir string, msgBus *bus.MessageBus, execApprovalMgr *tools.ExecApprovalManager, agentStore store.AgentStore, isManaged bool, skillStore store.SkillStore, configSecretsStore store.ConfigSecretsStore, teamStore store.TeamStore) *methods.PairingMethods {
 	router := server.Router()
 
 	// Phase 1: Core methods
@@ -40,6 +40,11 @@ func registerAllMethods(server *gateway.Server, agents *agent.Router, sessStore 
 
 	// Phase 2: Send (outbound message routing)
 	methods.NewSendMethods(msgBus).Register(router)
+
+	// Phase 4: Delegation history (managed mode only)
+	if teamStore != nil {
+		methods.NewDelegationsMethods(teamStore).Register(router)
+	}
 
 	slog.Info("registered all RPC methods",
 		"phase1", []string{"chat", "agents", "sessions", "config"},

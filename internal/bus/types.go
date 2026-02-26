@@ -39,10 +39,20 @@ type Event struct {
 	Payload interface{} `json:"payload,omitempty"`
 }
 
+// Cache invalidation kind constants.
+const (
+	CacheKindAgent            = "agent"
+	CacheKindBootstrap        = "bootstrap"
+	CacheKindSkills           = "skills"
+	CacheKindCron             = "cron"
+	CacheKindCustomTools      = "custom_tools"
+	CacheKindChannelInstances = "channel_instances"
+)
+
 // CacheInvalidatePayload signals cache layers to evict stale entries.
 // Used with protocol.EventCacheInvalidate events.
 type CacheInvalidatePayload struct {
-	Kind string `json:"kind"` // "agent", "bootstrap", "skills", "cron", "custom_tools", "channel_instances"
+	Kind string `json:"kind"` // CacheKind* constants
 	Key  string `json:"key"`  // agent_key, agent_id, etc. Empty = invalidate all
 }
 

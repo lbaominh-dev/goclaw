@@ -317,6 +317,12 @@ func displayWidth(s string) int {
 // chunkHTML splits HTML text into chunks that fit within maxLen.
 // Prefers splitting at paragraph boundaries (\n\n), then line boundaries (\n),
 // then word boundaries (space). Matching TS chunkText() logic.
+// chunkPlainText splits plain text into chunks that fit within maxLen,
+// preferring to split at paragraph or line boundaries.
+func chunkPlainText(text string, maxLen int) []string {
+	return chunkHTML(text, maxLen)
+}
+
 func chunkHTML(text string, maxLen int) []string {
 	if len(text) <= maxLen {
 		return []string{text}

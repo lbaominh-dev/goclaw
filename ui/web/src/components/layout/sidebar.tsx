@@ -11,11 +11,13 @@ import {
   Terminal,
   Settings,
   ShieldCheck,
+  Users,
   Link,
   Wrench,
   Plug,
   Volume2,
   Cpu,
+  ArrowRightLeft,
 } from "lucide-react";
 import { SidebarGroup } from "./sidebar-group";
 import { SidebarItem } from "./sidebar-item";
@@ -56,6 +58,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
 
         <SidebarGroup label="Management" collapsed={collapsed}>
           <SidebarItem to={ROUTES.AGENTS} icon={Bot} label="Agents" collapsed={collapsed} />
+          <SidebarItem to={ROUTES.TEAMS} icon={Users} label="Agent Teams" collapsed={collapsed} />
           <SidebarItem to={ROUTES.SESSIONS} icon={History} label="Sessions" collapsed={collapsed} />
           <SidebarItem to={ROUTES.CHANNELS} icon={Radio} label="Channels" collapsed={collapsed} />
           <SidebarItem to={ROUTES.SKILLS} icon={Zap} label="Skills" collapsed={collapsed} />
@@ -66,6 +69,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
 
         <SidebarGroup label="Monitoring" collapsed={collapsed}>
           <SidebarItem to={ROUTES.TRACES} icon={Activity} label="Traces" collapsed={collapsed} />
+          <SidebarItem to={ROUTES.DELEGATIONS} icon={ArrowRightLeft} label="Delegations" collapsed={collapsed} />
           <SidebarItem to={ROUTES.USAGE} icon={BarChart3} label="Usage" collapsed={collapsed} />
           <SidebarItem to={ROUTES.LOGS} icon={Terminal} label="Logs" collapsed={collapsed} />
         </SidebarGroup>

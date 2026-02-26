@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/nextlevelbuilder/goclaw/internal/sandbox"
@@ -11,9 +12,15 @@ import (
 
 // ListFilesTool lists files in a directory, optionally through a sandbox container.
 type ListFilesTool struct {
-	workspace  string
-	restrict   bool
-	sandboxMgr sandbox.Manager
+	workspace      string
+	restrict       bool
+	deniedPrefixes []string // path prefixes to deny access to (e.g. .goclaw)
+	sandboxMgr     sandbox.Manager
+}
+
+// DenyPaths adds path prefixes that list_files must reject/filter.
+func (t *ListFilesTool) DenyPaths(prefixes ...string) {
+	t.deniedPrefixes = append(t.deniedPrefixes, prefixes...)
 }
 
 func NewListFilesTool(workspace string, restrict bool) *ListFilesTool {
@@ -62,6 +69,9 @@ func (t *ListFilesTool) Execute(ctx context.Context, args map[string]interface{}
 	if err != nil {
 		return ErrorResult(err.Error())
 	}
+	if err := checkDeniedPath(resolved, t.workspace, t.deniedPrefixes); err != nil {
+		return ErrorResult(err.Error())
+	}
 
 	entries, err := os.ReadDir(resolved)
 	if err != nil {
@@ -73,6 +83,14 @@ func (t *ListFilesTool) Execute(ctx context.Context, args map[string]interface{}
 
 	var sb strings.Builder
 	for _, entry := range entries {
+		// Filter out denied directories from listing
+		if entry.IsDir() && len(t.deniedPrefixes) > 0 {
+			entryPath := filepath.Join(resolved, entry.Name())
+			if checkDeniedPath(entryPath, t.workspace, t.deniedPrefixes) != nil {
+				continue
+			}
+		}
+
 		info, _ := entry.Info()
 		if entry.IsDir() {
 			fmt.Fprintf(&sb, "[DIR]  %s/\n", entry.Name())

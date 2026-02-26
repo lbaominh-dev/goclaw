@@ -15,9 +15,15 @@ import (
 type EditTool struct {
 	workspace       string
 	restrict        bool
+	deniedPrefixes  []string // path prefixes to deny access to (e.g. .goclaw)
 	sandboxMgr      sandbox.Manager
 	contextFileIntc *ContextFileInterceptor
 	memIntc         *MemoryInterceptor
+}
+
+// DenyPaths adds path prefixes that edit must reject.
+func (t *EditTool) DenyPaths(prefixes ...string) {
+	t.deniedPrefixes = append(t.deniedPrefixes, prefixes...)
 }
 
 func (t *EditTool) SetContextFileInterceptor(intc *ContextFileInterceptor) {
@@ -137,6 +143,9 @@ func (t *EditTool) Execute(ctx context.Context, args map[string]interface{}) *Re
 	}
 	resolved, err := resolvePath(path, workspace, t.restrict)
 	if err != nil {
+		return ErrorResult(err.Error())
+	}
+	if err := checkDeniedPath(resolved, t.workspace, t.deniedPrefixes); err != nil {
 		return ErrorResult(err.Error())
 	}
 

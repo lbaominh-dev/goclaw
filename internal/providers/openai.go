@@ -144,6 +144,9 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest, onChun
 				CompletionTokens: chunk.Usage.CompletionTokens,
 				TotalTokens:      chunk.Usage.TotalTokens,
 			}
+			if chunk.Usage.PromptTokensDetails != nil {
+				result.Usage.CacheReadTokens = chunk.Usage.PromptTokensDetails.CachedTokens
+			}
 		}
 
 	}
@@ -300,6 +303,9 @@ func (p *OpenAIProvider) parseResponse(resp *openAIResponse) *ChatResponse {
 			CompletionTokens: resp.Usage.CompletionTokens,
 			TotalTokens:      resp.Usage.TotalTokens,
 		}
+		if resp.Usage.PromptTokensDetails != nil {
+			result.Usage.CacheReadTokens = resp.Usage.PromptTokensDetails.CachedTokens
+		}
 	}
 
 	return result
@@ -335,9 +341,14 @@ type openAIFunctionCall struct {
 }
 
 type openAIUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens        int                   `json:"prompt_tokens"`
+	CompletionTokens    int                   `json:"completion_tokens"`
+	TotalTokens         int                   `json:"total_tokens"`
+	PromptTokensDetails *openAIPromptDetails  `json:"prompt_tokens_details,omitempty"`
+}
+
+type openAIPromptDetails struct {
+	CachedTokens int `json:"cached_tokens"`
 }
 
 // Streaming types

@@ -45,6 +45,14 @@ func DefaultSubagentConfig() SubagentConfig {
 	}
 }
 
+// Subagent task status constants.
+const (
+	TaskStatusRunning   = "running"
+	TaskStatusCompleted = "completed"
+	TaskStatusFailed    = "failed"
+	TaskStatusCancelled = "cancelled"
+)
+
 // SubagentTask tracks a running or completed subagent.
 type SubagentTask struct {
 	ID              string `json:"id"`
@@ -110,7 +118,7 @@ func (sm *SubagentManager) CountRunningForParent(parentID string) int {
 	defer sm.mu.RUnlock()
 	count := 0
 	for _, t := range sm.tasks {
-		if t.ParentID == parentID && t.Status == "running" {
+		if t.ParentID == parentID && t.Status == TaskStatusRunning {
 			count++
 		}
 	}
@@ -160,7 +168,7 @@ func (sm *SubagentManager) Spawn(
 	// Check concurrent limit
 	running := 0
 	for _, t := range sm.tasks {
-		if t.Status == "running" {
+		if t.Status == TaskStatusRunning {
 			running++
 		}
 	}
@@ -258,7 +266,7 @@ func (sm *SubagentManager) RunSync(
 
 	iterations := sm.executeTask(ctx, subTask)
 
-	if subTask.Status == "failed" {
+	if subTask.Status == TaskStatusFailed {
 		return subTask.Result, iterations, fmt.Errorf("subagent failed: %s", subTask.Result)
 	}
 
@@ -375,7 +383,7 @@ func (sm *SubagentManager) executeTask(ctx context.Context, task *SubagentTask) 
 
 	if ctx.Err() != nil {
 		sm.mu.Lock()
-		task.Status = "cancelled"
+		task.Status = TaskStatusCancelled
 		task.Result = "cancelled before execution"
 		sm.mu.Unlock()
 		return 0
@@ -413,7 +421,7 @@ func (sm *SubagentManager) executeTask(ctx context.Context, task *SubagentTask) 
 
 		if ctx.Err() != nil {
 			sm.mu.Lock()
-			task.Status = "cancelled"
+			task.Status = TaskStatusCancelled
 			task.Result = "cancelled during execution"
 			sm.mu.Unlock()
 			return iteration
@@ -435,7 +443,7 @@ func (sm *SubagentManager) executeTask(ctx context.Context, task *SubagentTask) 
 
 		if err != nil {
 			sm.mu.Lock()
-			task.Status = "failed"
+			task.Status = TaskStatusFailed
 			task.Result = fmt.Sprintf("LLM error at iteration %d: %v", iteration, err)
 			sm.mu.Unlock()
 			slog.Warn("subagent LLM error", "id", task.ID, "iteration", iteration, "error", err)
@@ -478,7 +486,7 @@ func (sm *SubagentManager) executeTask(ctx context.Context, task *SubagentTask) 
 	if finalContent == "" {
 		finalContent = "Task completed but no final response was generated."
 	}
-	task.Status = "completed"
+	task.Status = TaskStatusCompleted
 	task.Result = finalContent
 	sm.mu.Unlock()
 

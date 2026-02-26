@@ -89,6 +89,29 @@ const (
 	MethodChannelInstancesDelete = "channels.instances.delete"
 )
 
+// Agent links (inter-agent delegation, managed mode)
+const (
+	MethodAgentsLinksList   = "agents.links.list"
+	MethodAgentsLinksCreate = "agents.links.create"
+	MethodAgentsLinksUpdate = "agents.links.update"
+	MethodAgentsLinksDelete = "agents.links.delete"
+)
+
+// Agent teams (managed mode)
+const (
+	MethodTeamsList     = "teams.list"
+	MethodTeamsCreate   = "teams.create"
+	MethodTeamsGet      = "teams.get"
+	MethodTeamsDelete   = "teams.delete"
+	MethodTeamsTaskList = "teams.tasks.list"
+)
+
+// Delegation history (managed mode)
+const (
+	MethodDelegationsList = "delegations.list"
+	MethodDelegationsGet  = "delegations.get"
+)
+
 // Phase 3+ - NICE TO HAVE methods
 const (
 	MethodLogsTail = "logs.tail"

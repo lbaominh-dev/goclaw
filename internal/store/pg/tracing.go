@@ -27,12 +27,12 @@ func (s *PGTracingStore) CreateTrace(ctx context.Context, trace *store.TraceData
 		trace.ID = store.GenNewID()
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO traces (id, agent_id, user_id, session_key, run_id, start_time, end_time,
+		`INSERT INTO traces (id, parent_trace_id, agent_id, user_id, session_key, run_id, start_time, end_time,
 		 duration_ms, name, channel, input_preview, output_preview,
 		 total_input_tokens, total_output_tokens, span_count, llm_call_count, tool_call_count,
 		 status, error, metadata, tags, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
-		trace.ID, nilUUID(trace.AgentID), nilStr(trace.UserID), nilStr(trace.SessionKey),
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
+		trace.ID, nilUUID(trace.ParentTraceID), nilUUID(trace.AgentID), nilStr(trace.UserID), nilStr(trace.SessionKey),
 		nilStr(trace.RunID), trace.StartTime, nilTime(trace.EndTime),
 		nilInt(trace.DurationMS), nilStr(trace.Name), nilStr(trace.Channel),
 		nilStr(trace.InputPreview), nilStr(trace.OutputPreview),
@@ -48,7 +48,7 @@ func (s *PGTracingStore) UpdateTrace(ctx context.Context, traceID uuid.UUID, upd
 
 func (s *PGTracingStore) GetTrace(ctx context.Context, traceID uuid.UUID) (*store.TraceData, error) {
 	var d store.TraceData
-	var agentID *uuid.UUID
+	var parentTraceID, agentID *uuid.UUID
 	var userID, sessionKey, runID, name, channel, inputPreview, outputPreview, errStr *string
 	var endTime *time.Time
 	var durationMS *int
@@ -56,12 +56,12 @@ func (s *PGTracingStore) GetTrace(ctx context.Context, traceID uuid.UUID) (*stor
 	var tags []byte
 
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, agent_id, user_id, session_key, run_id, start_time, end_time,
+		`SELECT id, parent_trace_id, agent_id, user_id, session_key, run_id, start_time, end_time,
 		 duration_ms, name, channel, input_preview, output_preview,
 		 total_input_tokens, total_output_tokens, span_count, llm_call_count, tool_call_count,
 		 status, error, metadata, tags, created_at
 		 FROM traces WHERE id = $1`, traceID,
-	).Scan(&d.ID, &agentID, &userID, &sessionKey, &runID, &d.StartTime, &endTime,
+	).Scan(&d.ID, &parentTraceID, &agentID, &userID, &sessionKey, &runID, &d.StartTime, &endTime,
 		&durationMS, &name, &channel, &inputPreview, &outputPreview,
 		&d.TotalInputTokens, &d.TotalOutputTokens, &d.SpanCount, &d.LLMCallCount, &d.ToolCallCount,
 		&d.Status, &errStr, &metadata, &tags, &d.CreatedAt)
@@ -69,6 +69,7 @@ func (s *PGTracingStore) GetTrace(ctx context.Context, traceID uuid.UUID) (*stor
 		return nil, err
 	}
 
+	d.ParentTraceID = parentTraceID
 	d.AgentID = agentID
 	d.UserID = derefStr(userID)
 	d.SessionKey = derefStr(sessionKey)
@@ -132,7 +133,7 @@ func (s *PGTracingStore) CountTraces(ctx context.Context, opts store.TraceListOp
 func (s *PGTracingStore) ListTraces(ctx context.Context, opts store.TraceListOpts) ([]store.TraceData, error) {
 	where, args := buildTraceWhere(opts)
 
-	q := `SELECT id, agent_id, user_id, session_key, run_id, start_time, end_time,
+	q := `SELECT id, parent_trace_id, agent_id, user_id, session_key, run_id, start_time, end_time,
 		 duration_ms, name, channel, input_preview, output_preview,
 		 total_input_tokens, total_output_tokens, span_count, llm_call_count, tool_call_count,
 		 status, error, metadata, tags, created_at
@@ -153,20 +154,21 @@ func (s *PGTracingStore) ListTraces(ctx context.Context, opts store.TraceListOpt
 	var result []store.TraceData
 	for rows.Next() {
 		var d store.TraceData
-		var agentID *uuid.UUID
+		var parentTraceID, agentID *uuid.UUID
 		var userID, sessionKey, runID, name, channel, inputPreview, outputPreview, errStr *string
 		var endTime *time.Time
 		var durationMS *int
 		var metadata *[]byte
 		var tags []byte
 
-		if err := rows.Scan(&d.ID, &agentID, &userID, &sessionKey, &runID, &d.StartTime, &endTime,
+		if err := rows.Scan(&d.ID, &parentTraceID, &agentID, &userID, &sessionKey, &runID, &d.StartTime, &endTime,
 			&durationMS, &name, &channel, &inputPreview, &outputPreview,
 			&d.TotalInputTokens, &d.TotalOutputTokens, &d.SpanCount, &d.LLMCallCount, &d.ToolCallCount,
 			&d.Status, &errStr, &metadata, &tags, &d.CreatedAt); err != nil {
 			continue
 		}
 
+		d.ParentTraceID = parentTraceID
 		d.AgentID = agentID
 		d.UserID = derefStr(userID)
 		d.SessionKey = derefStr(sessionKey)
@@ -343,7 +345,14 @@ func (s *PGTracingStore) BatchUpdateTraceAggregates(ctx context.Context, traceID
 			llm_call_count = (SELECT COUNT(*) FROM spans WHERE trace_id = $1 AND span_type = 'llm_call'),
 			tool_call_count = (SELECT COUNT(*) FROM spans WHERE trace_id = $1 AND span_type = 'tool_call'),
 			total_input_tokens = COALESCE((SELECT SUM(input_tokens) FROM spans WHERE trace_id = $1 AND span_type = 'llm_call' AND input_tokens IS NOT NULL), 0),
-			total_output_tokens = COALESCE((SELECT SUM(output_tokens) FROM spans WHERE trace_id = $1 AND span_type = 'llm_call' AND output_tokens IS NOT NULL), 0)
+			total_output_tokens = COALESCE((SELECT SUM(output_tokens) FROM spans WHERE trace_id = $1 AND span_type = 'llm_call' AND output_tokens IS NOT NULL), 0),
+			metadata = (
+				SELECT jsonb_build_object(
+					'total_cache_read_tokens', COALESCE(SUM((metadata->>'cache_read_tokens')::int), 0),
+					'total_cache_creation_tokens', COALESCE(SUM((metadata->>'cache_creation_tokens')::int), 0)
+				)
+				FROM spans WHERE trace_id = $1 AND span_type = 'llm_call' AND metadata IS NOT NULL
+			)
 		WHERE id = $1`, traceID)
 	return err
 }

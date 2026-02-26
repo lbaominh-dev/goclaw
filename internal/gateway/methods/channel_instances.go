@@ -39,7 +39,7 @@ func (m *ChannelInstancesMethods) emitCacheInvalidate() {
 	}
 	m.msgBus.Broadcast(bus.Event{
 		Name:    protocol.EventCacheInvalidate,
-		Payload: bus.CacheInvalidatePayload{Kind: "channel_instances"},
+		Payload: bus.CacheInvalidatePayload{Kind: bus.CacheKindChannelInstances},
 	})
 }
 

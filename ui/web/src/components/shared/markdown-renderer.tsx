@@ -22,7 +22,7 @@ function CodeBlock({
         <button
           type="button"
           onClick={() => copy(text)}
-          className="opacity-0 transition-opacity group-hover:opacity-100"
+          className="cursor-pointer opacity-0 transition-opacity group-hover:opacity-100"
           title="Copy code"
         >
           {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
