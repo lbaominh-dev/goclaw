@@ -92,6 +92,18 @@ func (t *TeamTasksTool) executeList(ctx context.Context) *Result {
 		return ErrorResult("failed to list tasks: " + err.Error())
 	}
 
+	// Truncate results for LLM context (full results preserved in DB)
+	const maxResultRunes = 3000
+	for i := range tasks {
+		if tasks[i].Result != nil {
+			r := []rune(*tasks[i].Result)
+			if len(r) > maxResultRunes {
+				s := string(r[:maxResultRunes]) + "..."
+				tasks[i].Result = &s
+			}
+		}
+	}
+
 	out, _ := json.Marshal(map[string]interface{}{
 		"tasks": tasks,
 		"count": len(tasks),

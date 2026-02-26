@@ -481,17 +481,8 @@ func (dm *DelegateManager) autoCompleteTeamTask(task *DelegationTask, resultCont
 	if dm.teamStore == nil || task.TeamTaskID == uuid.Nil {
 		return
 	}
-	// Truncate result for storage (keep first 500 runes to avoid splitting multi-byte UTF-8)
-	runes := []rune(resultContent)
-	if len(runes) > 500 {
-		runes = runes[:500]
-	}
-	summary := string(runes)
-	if len(runes) < len([]rune(resultContent)) {
-		summary += "..."
-	}
 	_ = dm.teamStore.ClaimTask(context.Background(), task.TeamTaskID, task.TargetAgentID)
-	if err := dm.teamStore.CompleteTask(context.Background(), task.TeamTaskID, summary); err != nil {
+	if err := dm.teamStore.CompleteTask(context.Background(), task.TeamTaskID, resultContent); err != nil {
 		slog.Warn("delegate: failed to auto-complete team task",
 			"task_id", task.TeamTaskID, "delegation_id", task.ID, "error", err)
 	} else {
