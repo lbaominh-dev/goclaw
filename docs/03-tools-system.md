@@ -120,6 +120,16 @@ Context keys ensure each tool call receives the correct per-call values without 
 | `spawn` | Spawn subagent (alternative to sessions_spawn) |
 | `nodes` | Node graph operations |
 
+### Global Skills
+
+Global skills (Tier 4 in the skills hierarchy) provide extended capabilities via Python scripts. The agent invokes them using the `exec` tool.
+
+**ai-multimodal**: Gemini-powered multimodal analysis and generation
+- **Capabilities**: Image/video/audio analysis, OCR, transcription, image generation (Imagen 4), video generation (Veo)
+- **Setup**: Set `GEMINI_API_KEY` env var; install Python deps: `pip install google-genai pillow python-dotenv`
+- **Usage**: Agent runs CLI commands like `python ~/.goclaw/skills/ai-multimodal/scripts/gemini_batch_process.py --task analyze --files image.png`
+- **Features**: Batch processing, media format detection, API key rotation support, multiple output formats
+
 ---
 
 ## 3. Filesystem Tools and Virtual FS Routing

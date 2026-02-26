@@ -108,7 +108,7 @@ flowchart TD
 | `internal/store/file/` | File-based implementations (standalone mode) |
 | `internal/bootstrap/` | System prompt files (AGENTS.md, SOUL.md, TOOLS.md, IDENTITY.md, USER.md, HEARTBEAT.md, BOOTSTRAP.md) + seeding + truncation |
 | `internal/config/` | Config loading (JSON5) + env var overlay |
-| `internal/skills/` | SKILL.md loader (5-tier hierarchy) + BM25 search + hot-reload via fsnotify |
+| `internal/skills/` | SKILL.md loader (5-tier hierarchy: workspace → project → personal → global → builtin) + BM25 search + hot-reload via fsnotify |
 | `internal/channels/` | Channel manager + adapters: Telegram, Feishu/Lark, Zalo, Discord, WhatsApp |
 | `internal/mcp/` | MCP server bridge (stdio, SSE, streamable-HTTP transports) |
 | `internal/scheduler/` | Lane-based concurrency control (main, subagent, cron lanes) with per-session serialization |

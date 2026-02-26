@@ -172,7 +172,7 @@ flowchart TD
     T1["Tier 1 (highest): Workspace skills<br/>workspace/skills/name/SKILL.md"] --> T2
     T2["Tier 2: Project agent skills<br/>workspace/.agents/skills/"] --> T3
     T3["Tier 3: Personal agent skills<br/>~/.agents/skills/"] --> T4
-    T4["Tier 4: Global/managed skills<br/>~/.goclaw/skills/"] --> T5
+    T4["Tier 4: Global/managed skills<br/>~/.goclaw/skills/<br/>(e.g. ai-multimodal)"] --> T5
     T5["Tier 5 (lowest): Builtin skills<br/>(bundled with binary)"]
 
     style T1 fill:#e1f5fe
@@ -180,6 +180,16 @@ flowchart TD
 ```
 
 Each skill directory contains a `SKILL.md` file with YAML/JSON frontmatter (`name`, `description`). The `{baseDir}` placeholder in SKILL.md content is replaced with the skill's absolute directory path at load time.
+
+### Global Skills (Tier 4)
+
+Tier 4 skills are installed globally at `~/.goclaw/skills/` and available to all agents. Example:
+
+| Skill | Purpose | Setup |
+|-------|---------|-------|
+| `ai-multimodal` | Image/video/audio analysis (Gemini API) + image/video generation | Set `GEMINI_API_KEY` env var, install Python deps: `pip install google-genai pillow python-dotenv` |
+
+Global skills use Python scripts invoked via the `exec` tool. The agent runs CLI commands like `python {baseDir}/scripts/gemini_batch_process.py --task analyze --files image.png`.
 
 ---
 
