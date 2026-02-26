@@ -150,7 +150,12 @@ export function TracesPage() {
                       {formatDuration(trace.duration_ms || computeDurationMs(trace.start_time, trace.end_time))}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {formatTokens(trace.total_input_tokens)} / {formatTokens(trace.total_output_tokens)}
+                      <div>{formatTokens(trace.total_input_tokens)} / {formatTokens(trace.total_output_tokens)}</div>
+                      {(trace.metadata?.total_cache_read_tokens ?? 0) > 0 && (
+                        <div className="text-xs text-green-400">
+                          {formatTokens(trace.metadata!.total_cache_read_tokens!)} cached
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {trace.span_count}
