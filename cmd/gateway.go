@@ -536,6 +536,28 @@ func runGateway() {
 	toolsReg.Register(tools.NewMessageTool())
 	slog.Info("session + message tools registered")
 
+	// Register legacy tool aliases (backward-compat names from policy.go).
+	for alias, canonical := range tools.LegacyToolAliases() {
+		toolsReg.RegisterAlias(alias, canonical)
+	}
+
+	// Register Claude Code tool aliases so Claude Code skills work without modification.
+	// LLM calls alias name → registry resolves to canonical tool → executes.
+	for alias, canonical := range map[string]string{
+		"Read":       "read_file",
+		"Write":      "write_file",
+		"Edit":       "edit",
+		"Bash":       "exec",
+		"WebFetch":   "web_fetch",
+		"WebSearch":  "web_search",
+		"Agent":      "spawn",
+		"Skill":      "use_skill",
+		"ToolSearch": "mcp_tool_search",
+	} {
+		toolsReg.RegisterAlias(alias, canonical)
+	}
+	slog.Info("tool aliases registered", "count", len(toolsReg.Aliases()))
+
 	// Allow read_file to access skills directories and CLI workspaces (outside workspace).
 	// Skills can live in ~/.goclaw/skills/, ~/.agents/skills/, ~/.goclaw/skills-store/, etc.
 	// CLI workspaces live in ~/.goclaw/cli-workspaces/ (agent working files).
