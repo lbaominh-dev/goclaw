@@ -4,10 +4,29 @@ set -e
 # Set up writable runtime directories for agent-installed packages.
 # Rootfs is read-only; /app/data is a writable Docker volume.
 RUNTIME_DIR="/app/data/.runtime"
+CONFIG_PATH="${GOCLAW_CONFIG:-/app/config.json}"
 # Non-fatal: on first start with a fresh volume the directory may not be
 # writable yet (volume initialisation race on some Docker runtimes).
 # The app starts fine without .runtime; package installs will fail gracefully.
 mkdir -p "$RUNTIME_DIR/pip" "$RUNTIME_DIR/npm-global/lib" "$RUNTIME_DIR/pip-cache" || true
+
+# Fix top-level data/config ownership for named volumes created by root on older
+# deployments. The app itself runs as goclaw and must be able to create or
+# update the configured JSON file under /app/data.
+if [ "$(id -u)" = "0" ] && [ -d /app/data ]; then
+  chown goclaw:goclaw /app/data 2>/dev/null || true
+  CONFIG_DIR=$(dirname "$CONFIG_PATH")
+  mkdir -p "$CONFIG_DIR" 2>/dev/null || true
+  if [ -d "$CONFIG_DIR" ]; then
+    chown goclaw:goclaw "$CONFIG_DIR" 2>/dev/null || true
+  fi
+  if [ ! -e "$CONFIG_PATH" ]; then
+    touch "$CONFIG_PATH" 2>/dev/null || true
+  fi
+  if [ -e "$CONFIG_PATH" ]; then
+    chown goclaw:goclaw "$CONFIG_PATH" 2>/dev/null || true
+  fi
+fi
 
 # Fix .runtime ownership for split root/goclaw access.
 # .runtime itself must be root-owned so pkg-helper (root) can write apk-packages.
