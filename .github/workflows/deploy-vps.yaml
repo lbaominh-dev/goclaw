@@ -23,9 +23,19 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
+          request_pty: true
           script_stop: true
           script: |
-            set -e
-            cd "${{ secrets.VPS_DEPLOY_PATH }}"
-            docker compose -f docker-compose.vps.yml pull goclaw goclaw-ui
-            docker compose -f docker-compose.vps.yml up -d goclaw goclaw-ui
+            set -eu
+            export TERM=xterm
+            DEPLOY_PATH="${{ secrets.VPS_DEPLOY_PATH }}"
+            if [ -z "$DEPLOY_PATH" ]; then
+              DEPLOY_PATH="/root/vps"
+            fi
+            if [ ! -d "$DEPLOY_PATH" ]; then
+              echo "Deploy path not found: $DEPLOY_PATH"
+              exit 1
+            fi
+            cd "$DEPLOY_PATH"
+            docker compose -f docker-compose.yml pull goclaw goclaw-ui
+            docker compose -f docker-compose.yml up -d goclaw goclaw-ui
