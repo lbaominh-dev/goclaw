@@ -5,9 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/nextlevelbuilder/goclaw/internal/config"
+	"github.com/nextlevelbuilder/goclaw/internal/providers"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
+	"github.com/nextlevelbuilder/goclaw/internal/tools"
 )
 
 func captureEmbeddingRequest(t *testing.T, es *store.EmbeddingSettings) map[string]any {
@@ -58,3 +63,54 @@ func TestBuildEmbeddingProviderIgnoresIncompatibleStoredDimensions(t *testing.T)
 		t.Fatalf("dimensions = %v, want fallback 1536", got)
 	}
 }
+
+func TestSetupSubagentsPreservesReadFileSkillAllowPaths(t *testing.T) {
+	workspace := t.TempDir()
+	skillsDir := t.TempDir()
+	skillDir := filepath.Join(skillsDir, "attached-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	skillFile := filepath.Join(skillDir, "SKILL.md")
+	if err := os.WriteFile(skillFile, []byte("# attached skill"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	providerReg := providers.NewRegistry(store.TenantIDFromContext)
+	providerReg.Register(&stubProvider{name: "test-provider"})
+
+	cfg := &config.Config{}
+	cfg.Agents.Defaults = config.AgentDefaults{Provider: "test-provider", RestrictToWorkspace: true}
+
+	toolsReg := tools.NewRegistry()
+	toolsReg.Register(tools.NewReadFileTool(workspace, true))
+	allowReadFileSkillPaths(toolsReg, readFilePathConfig{globalSkillsDir: skillsDir})
+
+	if mgr := setupSubagents(providerReg, cfg, nil, toolsReg, workspace, nil, readFilePathConfig{globalSkillsDir: skillsDir}); mgr == nil {
+		t.Fatal("setupSubagents() = nil, want manager")
+	}
+
+	reg := buildSubagentTools(toolsReg, workspace, true, nil, readFilePathConfig{globalSkillsDir: skillsDir})
+
+	res := reg.Execute(context.Background(), "read_file", map[string]any{"path": skillFile})
+	if res.IsError {
+		t.Fatalf("read_file() error = %q, want success", res.ForLLM)
+	}
+	if res.ForLLM != "# attached skill" {
+		t.Fatalf("read_file() = %q, want skill content", res.ForLLM)
+	}
+}
+
+type stubProvider struct{ name string }
+
+func (p *stubProvider) Chat(context.Context, providers.ChatRequest) (*providers.ChatResponse, error) {
+	panic("not used in test")
+}
+
+func (p *stubProvider) ChatStream(context.Context, providers.ChatRequest, func(providers.StreamChunk)) (*providers.ChatResponse, error) {
+	panic("not used in test")
+}
+
+func (p *stubProvider) DefaultModel() string { return "test-model" }
+
+func (p *stubProvider) Name() string { return p.name }

@@ -167,8 +167,21 @@ func runGateway() {
 
 	loadBootstrapFiles(pgStores, workspace, agentCfg)
 
+	skillsLoader, skillSearchTool, globalSkillsDir, bundledSkillsDir, builtinSkillsDir := setupSkillsSystem(cfg, workspace, dataDir, pgStores, toolsReg, providerRegistry, msgBus)
+	_ = skillSearchTool // used via wireExtras → skillsLoader; kept for type clarity
+
 	// Subagent system
-	subagentMgr := setupSubagents(providerRegistry, cfg, msgBus, toolsReg, workspace, sandboxMgr)
+	subagentMgr := setupSubagents(providerRegistry, cfg, msgBus, toolsReg, workspace, sandboxMgr, readFilePathConfig{
+		globalSkillsDir:  globalSkillsDir,
+		builtinSkillsDir: builtinSkillsDir,
+		dataDir:          dataDir,
+		managedSkillDirs: func() []string {
+			if pgStores.Skills == nil {
+				return nil
+			}
+			return pgStores.Skills.Dirs()
+		}(),
+	})
 	if subagentMgr != nil {
 		// Wire announce queue for batched subagent result delivery (matching TS debounce pattern)
 		announceQueue := tools.NewAnnounceQueue(1000, 20,
@@ -227,9 +240,6 @@ func runGateway() {
 		slog.Info("subagent system enabled", "tools", []string{"spawn"})
 	}
 
-	skillsLoader, skillSearchTool, globalSkillsDir, bundledSkillsDir, builtinSkillsDir := setupSkillsSystem(cfg, workspace, dataDir, pgStores, toolsReg, providerRegistry, msgBus)
-	_ = skillSearchTool // used via wireExtras → skillsLoader; kept for type clarity
-
 	// DateTime tool (precise time for cron scheduling, memory timestamps, etc.)
 	toolsReg.Register(tools.NewDateTimeTool())
 
@@ -280,24 +290,17 @@ func runGateway() {
 	// Allow read_file to access skills directories and CLI workspaces (outside workspace).
 	// Skills can live under dataDir/skills/, ~/.agents/skills/, dataDir/skills-store/, etc.
 	// CLI workspaces live in dataDir/cli-workspaces/ (agent working files).
-	homeDir, _ := os.UserHomeDir()
-	if readTool, ok := toolsReg.Get("read_file"); ok {
-		if pa, ok := readTool.(tools.PathAllowable); ok {
-			pa.AllowPaths(globalSkillsDir)
-			if homeDir != "" {
-				pa.AllowPaths(filepath.Join(homeDir, ".agents", "skills"))
+	allowReadFileSkillPaths(toolsReg, readFilePathConfig{
+		globalSkillsDir:  globalSkillsDir,
+		builtinSkillsDir: builtinSkillsDir,
+		dataDir:          dataDir,
+		managedSkillDirs: func() []string {
+			if pgStores.Skills == nil {
+				return nil
 			}
-			pa.AllowPaths(filepath.Join(dataDir, "cli-workspaces"))
-			// Also allow the skills store directory (uploaded skill content).
-			if pgStores.Skills != nil {
-				pa.AllowPaths(pgStores.Skills.Dirs()...)
-			}
-			// Allow builtin skills dir (fallback when managed copy is missing).
-			pa.AllowPaths(builtinSkillsDir)
-			// Allow tenant-scoped skills-store dirs (dataDir/tenants/{slug}/skills-store/).
-			pa.AllowPaths(filepath.Join(dataDir, "tenants"))
-		}
-	}
+			return pgStores.Skills.Dirs()
+		}(),
+	})
 
 	// Memory tools are PG-backed; always available.
 	hasMemory := true

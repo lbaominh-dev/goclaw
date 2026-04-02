@@ -156,7 +156,7 @@ func buildEmbeddingProvider(
 	return nil
 }
 
-func setupSubagents(providerReg *providers.Registry, cfg *config.Config, msgBus *bus.MessageBus, toolsReg *tools.Registry, workspace string, sandboxMgr sandbox.Manager) *tools.SubagentManager {
+func setupSubagents(providerReg *providers.Registry, cfg *config.Config, msgBus *bus.MessageBus, toolsReg *tools.Registry, workspace string, sandboxMgr sandbox.Manager, readPathCfg readFilePathConfig) *tools.SubagentManager {
 	names := providerReg.List(context.Background())
 	if len(names) == 0 {
 		return nil
@@ -197,22 +197,27 @@ func setupSubagents(providerReg *providers.Registry, cfg *config.Config, msgBus 
 	// NOTE: SubagentManager.applyDenyList() handles deny lists after createTools(),
 	// so we don't apply deny lists here.
 	toolsFactory := func() *tools.Registry {
-		reg := toolsReg.Clone()
-		if sandboxMgr != nil {
-			reg.Register(tools.NewSandboxedReadFileTool(workspace, agentCfg.RestrictToWorkspace, sandboxMgr))
-			reg.Register(tools.NewSandboxedWriteFileTool(workspace, agentCfg.RestrictToWorkspace, sandboxMgr))
-			reg.Register(tools.NewSandboxedListFilesTool(workspace, agentCfg.RestrictToWorkspace, sandboxMgr))
-			reg.Register(tools.NewSandboxedExecTool(workspace, agentCfg.RestrictToWorkspace, sandboxMgr))
-		} else {
-			reg.Register(tools.NewReadFileTool(workspace, agentCfg.RestrictToWorkspace))
-			reg.Register(tools.NewWriteFileTool(workspace, agentCfg.RestrictToWorkspace))
-			reg.Register(tools.NewListFilesTool(workspace, agentCfg.RestrictToWorkspace))
-			reg.Register(tools.NewExecTool(workspace, agentCfg.RestrictToWorkspace))
-		}
-		return reg
+		return buildSubagentTools(toolsReg, workspace, agentCfg.RestrictToWorkspace, sandboxMgr, readPathCfg)
 	}
 
 	return tools.NewSubagentManager(provider, providerReg, agentCfg.Model, msgBus, toolsFactory, subCfg)
+}
+
+func buildSubagentTools(parent *tools.Registry, workspace string, restrict bool, sandboxMgr sandbox.Manager, readPathCfg readFilePathConfig) *tools.Registry {
+	reg := parent.Clone()
+	if sandboxMgr != nil {
+		reg.Register(tools.NewSandboxedReadFileTool(workspace, restrict, sandboxMgr))
+		reg.Register(tools.NewSandboxedWriteFileTool(workspace, restrict, sandboxMgr))
+		reg.Register(tools.NewSandboxedListFilesTool(workspace, restrict, sandboxMgr))
+		reg.Register(tools.NewSandboxedExecTool(workspace, restrict, sandboxMgr))
+	} else {
+		reg.Register(tools.NewReadFileTool(workspace, restrict))
+		reg.Register(tools.NewWriteFileTool(workspace, restrict))
+		reg.Register(tools.NewListFilesTool(workspace, restrict))
+		reg.Register(tools.NewExecTool(workspace, restrict))
+	}
+	allowReadFileSkillPaths(reg, readPathCfg)
+	return reg
 }
 
 // setupTTS creates the TTS manager from config and registers providers.
