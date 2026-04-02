@@ -231,10 +231,10 @@ func (c *Channel) handleMessage(_ *discordgo.Session, m *discordgo.MessageCreate
 	c.typingCtrls.Store(channelID, typingCtrl)
 	typingCtrl.Start()
 
-	// Send placeholder "Thinking..." message.
+	// Send placeholder spinner message.
 	// Key by inbound message ID (not channel ID) to avoid race conditions
 	// when multiple messages arrive in the same channel concurrently.
-	placeholder, err := c.session.ChannelMessageSend(channelID, "Thinking...")
+	placeholder, err := c.session.ChannelMessageSend(channelID, channels.RandomSpinnerText())
 	if err == nil {
 		c.placeholders.Store(m.ID, placeholder.ID)
 	}

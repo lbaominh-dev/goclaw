@@ -223,7 +223,7 @@ func (c *Channel) handleMessage(ev *slackevents.MessageEvent) {
 	}
 
 	placeholderOpts := []slackapi.MsgOption{
-		slackapi.MsgOptionText("Thinking...", false),
+		slackapi.MsgOptionText(channels.RandomSpinnerText(), false),
 	}
 	if replyThreadTS != "" {
 		placeholderOpts = append(placeholderOpts, slackapi.MsgOptionTS(replyThreadTS))
