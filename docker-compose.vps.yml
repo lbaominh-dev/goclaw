@@ -1,0 +1,189 @@
+# Combined VPS compose: existing services + goclaw (managed) + goclaw-ui.
+#
+# Directory layout on VPS:
+#   ~/vps/
+#   ├── docker-compose.yml
+#   ├── .env
+#   ├── clipproxy-config.yaml
+#   ├── clipproxy-auth/
+#   ├── config/                   # openclaw config
+#   ├── workspace/                # openclaw workspace
+#   ├── openclaw/                 # openclaw repo
+#   └── goclaw/                   # goclaw repo
+#
+# Images (GHCR primary, Docker Hub mirror):
+#   goclaw:    ghcr.io/nextlevelbuilder/goclaw:latest  /  digitop/goclaw:latest
+#   goclaw-ui: ghcr.io/nextlevelbuilder/goclaw-web:latest  /  digitop/goclaw-web:latest
+#
+# Usage:
+#   cd ~/vps && docker compose up -d
+#
+# Upgrade (run before restarting goclaw after a new image):
+#   docker compose run --rm upgrade
+#
+# Memory budget (2 GB RAM + 2 GB swap):
+#   clipproxy        400M limit  (~50-100M actual)
+#   openclaw-gateway 1280M limit (~300-600M actual)
+#   postgres         384M limit  (~100-200M actual)
+#   goclaw           512M limit  (~150-300M actual)
+#   goclaw-ui         64M limit  (~10-20M actual)
+#   chrome           2G limit    (~200-600M actual, CDP headless)
+#   Actual total:    ~800-1.4G (fits in RAM, swap covers spikes)
+
+services:
+  chrome:
+    image: zenika/alpine-chrome:124
+    container_name: goclaw-chrome
+    command:
+      - --no-sandbox
+      - --remote-debugging-address=0.0.0.0
+      - --remote-debugging-port=9222
+      - --remote-allow-origins=*
+      - --disable-gpu
+      - --disable-dev-shm-usage
+    shm_size: 2gb
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9222/json/version >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+    restart: unless-stopped
+
+  clipproxy:
+    image: eceasy/cli-proxy-api:latest
+    container_name: clipproxy
+    restart: unless-stopped
+    ports:
+      - "8317:8317"
+    volumes:
+      - ./clipproxy-config.yaml:/CLIProxyAPI/config.yaml
+      - ./clipproxy-auth:/root/.cli-proxy-api
+    deploy:
+      resources:
+        limits:
+          memory: 400M
+
+  postgres:
+    image: pgvector/pgvector:pg18
+    container_name: goclaw-postgres
+    environment:
+      POSTGRES_USER: ${GOCLAW_POSTGRES_USER:-goclaw}
+      POSTGRES_PASSWORD: ${GOCLAW_POSTGRES_PASSWORD:-goclaw}
+      POSTGRES_DB: ${GOCLAW_POSTGRES_DB:-goclaw}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${GOCLAW_POSTGRES_USER:-goclaw}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+    restart: unless-stopped
+
+  upgrade:
+    image: lbaominh/goclaw:latest
+    container_name: goclaw-upgrade
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - GOCLAW_POSTGRES_DSN=host=postgres port=5432 user=${GOCLAW_POSTGRES_USER:-goclaw} password=${GOCLAW_POSTGRES_PASSWORD:-goclaw} dbname=${GOCLAW_POSTGRES_DB:-goclaw} sslmode=disable
+      - GOCLAW_CONFIG=/app/data/config.json
+      - GOCLAW_MIGRATIONS_DIR=/app/migrations
+      - GOCLAW_ENCRYPTION_KEY=${GOCLAW_ENCRYPTION_KEY:-}
+    volumes:
+      - goclaw-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/app/goclaw"]
+    command: ["upgrade"]
+    profiles:
+      - upgrade
+    restart: "no"
+
+  goclaw:
+    image: lbaominh/goclaw:latest
+    container_name: goclaw
+    init: true
+    ports:
+      - "${GOCLAW_PORT:-18790}:18790"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - GOCLAW_HOST=0.0.0.0
+      - GOCLAW_PORT=18790
+      - GOCLAW_MODE=managed
+      - GOCLAW_POSTGRES_DSN=host=postgres port=5432 user=${GOCLAW_POSTGRES_USER:-goclaw} password=${GOCLAW_POSTGRES_PASSWORD:-goclaw} dbname=${GOCLAW_POSTGRES_DB:-goclaw} sslmode=disable
+      - GOCLAW_GATEWAY_TOKEN=${GOCLAW_GATEWAY_TOKEN:-}
+      - GOCLAW_ENCRYPTION_KEY=${GOCLAW_ENCRYPTION_KEY:-}
+      - GOCLAW_OWNER_IDS=${GOCLAW_OWNER_IDS:-}
+      - GOCLAW_PROVIDER=${GOCLAW_PROVIDER:-}
+      - GOCLAW_MODEL=${GOCLAW_MODEL:-}
+      - GOCLAW_OPENROUTER_API_KEY=${GOCLAW_OPENROUTER_API_KEY:-}
+      - GOCLAW_ANTHROPIC_API_KEY=${GOCLAW_ANTHROPIC_API_KEY:-}
+      - GOCLAW_OPENAI_API_KEY=${GOCLAW_OPENAI_API_KEY:-}
+      - GOCLAW_MINIMAX_API_KEY=${GOCLAW_MINIMAX_API_KEY:-}
+      - GOCLAW_GROQ_API_KEY=${GOCLAW_GROQ_API_KEY:-}
+      - GOCLAW_DEEPSEEK_API_KEY=${GOCLAW_DEEPSEEK_API_KEY:-}
+      - GOCLAW_GEMINI_API_KEY=${GOCLAW_GEMINI_API_KEY:-}
+      - GOCLAW_MISTRAL_API_KEY=${GOCLAW_MISTRAL_API_KEY:-}
+      - GOCLAW_XAI_API_KEY=${GOCLAW_XAI_API_KEY:-}
+      - GOCLAW_TELEGRAM_TOKEN=${GOCLAW_TELEGRAM_TOKEN:-}
+      - GOCLAW_TRACE_VERBOSE=${GOCLAW_TRACE_VERBOSE:-0}
+      - GOCLAW_CONFIG=/app/data/config.json
+      - GOCLAW_WORKSPACE=/app/workspace
+      - GOCLAW_SKILLS_DIR=/app/data/skills
+      - GOCLAW_BROWSER_REMOTE_URL=ws://chrome:9222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      chrome:
+        condition: service_healthy
+    volumes:
+      - goclaw-data:/app/data
+      - goclaw-workspace:/app/workspace
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '2.0'
+          pids: 200
+    restart: unless-stopped
+
+  goclaw-ui:
+    image: lbaominh/goclaw-ui:latest
+    container_name: goclaw-ui
+    ports:
+      - "${GOCLAW_UI_PORT:-3000}:80"
+    depends_on:
+      - goclaw
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  goclaw-data:
+  goclaw-workspace:
