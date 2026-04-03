@@ -102,6 +102,8 @@ export interface ChatGPTOAuthRoutingConfig {
   extra_provider_names?: string[];
 }
 
+export type AgentExecutionMode = "server" | "local_worker";
+
 export interface AgentData {
   id: string;
   agent_key: string;
@@ -117,6 +119,9 @@ export interface AgentData {
   agent_type: "open" | "predefined";
   is_default: boolean;
   status: string;
+  execution_mode?: AgentExecutionMode;
+  local_runtime_kind?: string;
+  bound_worker_id?: string;
   created_at?: string;
   updated_at?: string;
 

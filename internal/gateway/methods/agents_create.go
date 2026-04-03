@@ -24,18 +24,21 @@ import (
 func (m *AgentsMethods) handleCreate(ctx context.Context, client *gateway.Client, req *protocol.RequestFrame) {
 	locale := store.LocaleFromContext(ctx)
 	var params struct {
-		Name              string   `json:"name"`
-		Workspace         string   `json:"workspace"`
-		Emoji             string   `json:"emoji"`
-		Avatar            string   `json:"avatar"`
-		Provider          string   `json:"provider"`
-		Model             string   `json:"model"`
-		AgentType         string   `json:"agent_type"`          // "open" (default) or "predefined"
-		OwnerIDs          []string `json:"owner_ids,omitempty"` // first entry used as DB owner_id; falls back to "system"
-		TenantID          string   `json:"tenant_id"`           // required for cross-tenant callers; ignored otherwise
-		ContextWindow     int      `json:"context_window"`
-		MaxToolIterations int      `json:"max_tool_iterations"`
-		BudgetCents       *int     `json:"budget_monthly_cents"`
+		Name              string          `json:"name"`
+		Workspace         string          `json:"workspace"`
+		Emoji             string          `json:"emoji"`
+		Avatar            string          `json:"avatar"`
+		Provider          string          `json:"provider"`
+		Model             string          `json:"model"`
+		AgentType         string          `json:"agent_type"`          // "open" (default) or "predefined"
+		OwnerIDs          []string        `json:"owner_ids,omitempty"` // first entry used as DB owner_id; falls back to "system"
+		TenantID          string          `json:"tenant_id"`           // required for cross-tenant callers; ignored otherwise
+		ContextWindow     int             `json:"context_window"`
+		MaxToolIterations int             `json:"max_tool_iterations"`
+		BudgetCents       *int            `json:"budget_monthly_cents"`
+		ExecutionMode     json.RawMessage `json:"execution_mode"`
+		LocalRuntimeKind  json.RawMessage `json:"local_runtime_kind"`
+		BoundWorkerID     json.RawMessage `json:"bound_worker_id"`
 		// Per-agent config overrides
 		ToolsConfig      json.RawMessage `json:"tools_config,omitempty"`
 		SubagentsConfig  json.RawMessage `json:"subagents_config,omitempty"`
@@ -115,26 +118,57 @@ func (m *AgentsMethods) handleCreate(ctx context.Context, client *gateway.Client
 			model = m.cfg.Agents.Defaults.Model
 		}
 
+		var executionMode string
+		if len(params.ExecutionMode) > 0 {
+			if err := json.Unmarshal(params.ExecutionMode, &executionMode); err != nil {
+				client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, "execution_mode must be a string"))
+				return
+			}
+		}
+		var localRuntimeKind string
+		if len(params.LocalRuntimeKind) > 0 {
+			if err := json.Unmarshal(params.LocalRuntimeKind, &localRuntimeKind); err != nil {
+				client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, "local_runtime_kind must be a string"))
+				return
+			}
+		}
+		var boundWorkerID string
+		if len(params.BoundWorkerID) > 0 {
+			if err := json.Unmarshal(params.BoundWorkerID, &boundWorkerID); err != nil {
+				client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, "bound_worker_id must be a string"))
+				return
+			}
+		}
+
+		executionMode = store.NormalizeAgentExecutionMode(executionMode)
+		if err := store.ValidateAgentExecutionSettings(executionMode, localRuntimeKind, boundWorkerID); err != nil {
+			client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, err.Error()))
+			return
+		}
+
 		agentData := &store.AgentData{
-			AgentKey:         agentID,
-			DisplayName:      params.Name,
-			OwnerID:          ownerID,
-			TenantID:         tenantID,
-			AgentType:        agentType,
-			Provider:         provider,
-			Model:            model,
-			Workspace:        ws,
-			ContextWindow:     params.ContextWindow,
-			MaxToolIterations: params.MaxToolIterations,
+			AgentKey:           agentID,
+			DisplayName:        params.Name,
+			OwnerID:            ownerID,
+			TenantID:           tenantID,
+			AgentType:          agentType,
+			Provider:           provider,
+			Model:              model,
+			Workspace:          ws,
+			ExecutionMode:      executionMode,
+			LocalRuntimeKind:   localRuntimeKind,
+			BoundWorkerID:      boundWorkerID,
+			ContextWindow:      params.ContextWindow,
+			MaxToolIterations:  params.MaxToolIterations,
 			BudgetMonthlyCents: params.BudgetCents,
-			Status:           store.AgentStatusActive,
-			ToolsConfig:      params.ToolsConfig,
-			SubagentsConfig:  params.SubagentsConfig,
-			SandboxConfig:    params.SandboxConfig,
-			MemoryConfig:     params.MemoryConfig,
-			CompactionConfig: params.CompactionConfig,
-			ContextPruning:   params.ContextPruning,
-			OtherConfig:      params.OtherConfig,
+			Status:             store.AgentStatusActive,
+			ToolsConfig:        params.ToolsConfig,
+			SubagentsConfig:    params.SubagentsConfig,
+			SandboxConfig:      params.SandboxConfig,
+			MemoryConfig:       params.MemoryConfig,
+			CompactionConfig:   params.CompactionConfig,
+			ContextPruning:     params.ContextPruning,
+			OtherConfig:        params.OtherConfig,
 		}
 		if err := m.agentStore.Create(ctx, agentData); err != nil {
 			client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInternal, i18n.T(locale, i18n.MsgFailedToCreate, "agent", fmt.Sprintf("%v", err))))

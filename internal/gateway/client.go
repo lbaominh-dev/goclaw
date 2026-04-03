@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
+	"github.com/nextlevelbuilder/goclaw/internal/localworker"
 	"github.com/nextlevelbuilder/goclaw/internal/permissions"
 	"github.com/nextlevelbuilder/goclaw/pkg/protocol"
 )
@@ -42,6 +43,8 @@ type Client struct {
 	tenantID   uuid.UUID // resolved tenant; always concrete after connect
 	tenantName string    // resolved tenant display name (set during connect)
 	tenantSlug string    // resolved tenant URL slug (set during connect)
+
+	registeredWorkerID string
 }
 
 func NewClient(conn *websocket.Conn, server *Server, remoteIP string) *Client {
@@ -191,6 +194,12 @@ func (c *Client) SendEvent(event protocol.EventFrame) {
 	}
 }
 
+// Dispatch adapts a websocket client to the local worker connection interface.
+func (c *Client) Dispatch(_ context.Context, env localworker.Envelope) error {
+	c.SendEvent(*protocol.NewEvent(env.Type, env.Payload))
+	return nil
+}
+
 func (c *Client) sendError(id, code, message string) {
 	c.SendResponse(protocol.NewErrorResponse(id, code, message))
 }
@@ -223,6 +232,12 @@ func (c *Client) IsOwner() bool { return c.role == permissions.RoleOwner }
 func (c *Client) HasScope(scope permissions.Scope) bool {
 	return slices.Contains(c.scopes, scope)
 }
+
+// RegisteredWorkerID returns the worker bound to this websocket connection.
+func (c *Client) RegisteredWorkerID() string { return c.registeredWorkerID }
+
+// SetRegisteredWorkerID binds a worker ID to this websocket connection.
+func (c *Client) SetRegisteredWorkerID(workerID string) { c.registeredWorkerID = workerID }
 
 // hasTeamAccess checks if the client has access to a team (for event filtering).
 // Returns true for admin role. For others, checks the lazily-populated teamIDs cache.

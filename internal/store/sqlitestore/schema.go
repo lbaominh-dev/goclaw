@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"fmt"
 	"log/slog"
+	"strings"
 )
 
 //go:embed schema.sql
@@ -14,7 +15,7 @@ var schemaSQL string
 
 // SchemaVersion is the current SQLite schema version.
 // Bump this when adding new migration steps below.
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 // migrations maps version → SQL to apply when upgrading FROM that version.
 // schema.sql always represents the LATEST full schema (for fresh DBs).
@@ -74,7 +75,7 @@ CREATE UNIQUE INDEX idx_channel_contacts_tenant_type_sender
     metadata          TEXT NOT NULL DEFAULT '{}',
     created_at        TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at        TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
+ );
 CREATE INDEX IF NOT EXISTS idx_subagent_tasks_parent_status ON subagent_tasks(tenant_id, parent_agent_key, status);
 CREATE INDEX IF NOT EXISTS idx_subagent_tasks_session ON subagent_tasks(session_key);
 CREATE INDEX IF NOT EXISTS idx_subagent_tasks_created ON subagent_tasks(tenant_id, created_at);`,
@@ -124,17 +125,26 @@ func EnsureSchema(db *sql.DB) error {
 	if current < SchemaVersion {
 		slog.Info("sqlite: migrating schema", "from", current, "to", SchemaVersion)
 		for v := current; v < SchemaVersion; v++ {
-			patch, ok := migrations[v]
-			if !ok {
-				return fmt.Errorf("sqlite: missing migration for version %d → %d", v, v+1)
-			}
 			tx, txErr := db.Begin()
 			if txErr != nil {
 				return fmt.Errorf("begin migration tx v%d: %w", v, txErr)
 			}
-			if _, err := tx.Exec(patch); err != nil {
-				tx.Rollback()
-				return fmt.Errorf("apply migration v%d: %w", v, err)
+
+			if v == 5 {
+				if err := applyWorkerSchemaMigrationV5ToV6(tx); err != nil {
+					tx.Rollback()
+					return fmt.Errorf("apply migration v%d: %w", v, err)
+				}
+			} else {
+				patch, ok := migrations[v]
+				if !ok {
+					tx.Rollback()
+					return fmt.Errorf("sqlite: missing migration for version %d → %d", v, v+1)
+				}
+				if _, err := tx.Exec(patch); err != nil {
+					tx.Rollback()
+					return fmt.Errorf("apply migration v%d: %w", v, err)
+				}
 			}
 			if _, err := tx.Exec(
 				"UPDATE schema_version SET version = ? WHERE version = ?", v+1, v,
@@ -150,6 +160,96 @@ func EnsureSchema(db *sql.DB) error {
 	}
 
 	return seedMasterTenant(db)
+}
+
+func applyWorkerSchemaMigrationV5ToV6(tx *sql.Tx) error {
+	stmts := []string{
+		`ALTER TABLE agents ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'server'`,
+		`ALTER TABLE agents ADD COLUMN local_runtime_kind TEXT`,
+		`ALTER TABLE agents ADD COLUMN bound_worker_id TEXT`,
+		`CREATE INDEX IF NOT EXISTS idx_agents_tenant_bound_worker ON agents(tenant_id, bound_worker_id) WHERE bound_worker_id IS NOT NULL`,
+		`CREATE TABLE IF NOT EXISTS local_workers (
+    id                TEXT PRIMARY KEY,
+    tenant_id         TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    worker_id         TEXT NOT NULL,
+    runtime_kind      TEXT NOT NULL,
+    display_name      TEXT,
+    status            TEXT NOT NULL DEFAULT 'online',
+    last_heartbeat_at TEXT,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(tenant_id, worker_id)
+)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+
+	hasJobs, err := sqliteTableExists(tx, "local_worker_jobs")
+	if err != nil {
+		return err
+	}
+
+	if hasJobs {
+		if _, err := tx.Exec(`ALTER TABLE local_worker_jobs RENAME TO local_worker_jobs__old`); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.Exec(`CREATE TABLE local_worker_jobs (
+    id           TEXT PRIMARY KEY,
+    tenant_id    TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    worker_id    TEXT NOT NULL,
+    agent_id     TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    task_id      TEXT,
+    job_type     TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'queued',
+    payload      TEXT NOT NULL DEFAULT '{}',
+    result       TEXT,
+    started_at   TEXT,
+    completed_at TEXT,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+)`); err != nil {
+		return err
+	}
+
+	if hasJobs {
+		if _, err := tx.Exec(`INSERT INTO local_worker_jobs (id, tenant_id, worker_id, agent_id, task_id, job_type, status, payload, result, started_at, completed_at, created_at, updated_at)
+SELECT id, tenant_id, worker_id, agent_id, task_id, job_type, status, payload, result, started_at, completed_at, created_at, updated_at
+FROM local_worker_jobs__old`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DROP TABLE local_worker_jobs__old`); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_local_workers_tenant_worker ON local_workers(tenant_id, worker_id)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_tenant_worker_status ON local_worker_jobs(tenant_id, worker_id, status)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_tenant_task ON local_worker_jobs(tenant_id, task_id) WHERE task_id IS NOT NULL`); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func sqliteTableExists(tx *sql.Tx, name string) (bool, error) {
+	var found string
+	err := tx.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, name).Scan(&found)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return strings.EqualFold(found, name), nil
 }
 
 // seedMasterTenant ensures the master tenant row exists (idempotent).

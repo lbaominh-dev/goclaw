@@ -104,9 +104,16 @@ const agentSelectCols = `id, agent_key, display_name, frontmatter, owner_id, pro
 		 context_window, max_tool_iterations, workspace, restrict_to_workspace,
 		 tools_config, sandbox_config, subagents_config, memory_config,
 		 compaction_config, context_pruning, other_config,
-		 agent_type, is_default, status, budget_monthly_cents, created_at, updated_at, tenant_id`
+		 agent_type, is_default, status, execution_mode, local_runtime_kind, bound_worker_id,
+		 budget_monthly_cents, created_at, updated_at, tenant_id`
 
 func (s *PGAgentStore) Create(ctx context.Context, agent *store.AgentData) error {
+	agent.ExecutionMode = store.NormalizeAgentExecutionMode(agent.ExecutionMode)
+	agent.LocalRuntimeKind = strings.TrimSpace(agent.LocalRuntimeKind)
+	agent.BoundWorkerID = strings.TrimSpace(agent.BoundWorkerID)
+	if err := store.ValidateAgentExecutionSettings(agent.ExecutionMode, agent.LocalRuntimeKind, agent.BoundWorkerID); err != nil {
+		return err
+	}
 	if agent.ID == uuid.Nil {
 		agent.ID = store.GenNewID()
 	}
@@ -122,13 +129,17 @@ func (s *PGAgentStore) Create(ctx context.Context, agent *store.AgentData) error
 		 context_window, max_tool_iterations, workspace, restrict_to_workspace,
 		 tools_config, sandbox_config, subagents_config, memory_config,
 		 compaction_config, context_pruning, other_config,
-		 agent_type, is_default, status, budget_monthly_cents, created_at, updated_at, tenant_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`,
+		 agent_type, is_default, status, execution_mode, local_runtime_kind, bound_worker_id,
+		 budget_monthly_cents, created_at, updated_at, tenant_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)`,
 		agent.ID, agent.AgentKey, agent.DisplayName, sql.NullString{String: agent.Frontmatter, Valid: agent.Frontmatter != ""}, agent.OwnerID, agent.Provider, agent.Model,
 		agent.ContextWindow, agent.MaxToolIterations, agent.Workspace, agent.RestrictToWorkspace,
 		jsonOrEmpty(agent.ToolsConfig), jsonOrNull(agent.SandboxConfig), jsonOrNull(agent.SubagentsConfig), jsonOrNull(agent.MemoryConfig),
 		jsonOrNull(agent.CompactionConfig), jsonOrNull(agent.ContextPruning), jsonOrEmpty(agent.OtherConfig),
-		agent.AgentType, agent.IsDefault, agent.Status, agent.BudgetMonthlyCents, now, now, tenantID,
+		agent.AgentType, agent.IsDefault, agent.Status, agent.ExecutionMode,
+		sql.NullString{String: agent.LocalRuntimeKind, Valid: agent.LocalRuntimeKind != ""},
+		sql.NullString{String: agent.BoundWorkerID, Valid: agent.BoundWorkerID != ""},
+		agent.BudgetMonthlyCents, now, now, tenantID,
 	)
 	if err != nil {
 		return err
@@ -190,6 +201,13 @@ func (s *PGAgentStore) Update(ctx context.Context, id uuid.UUID, updates map[str
 	if len(updates) == 0 {
 		return nil
 	}
+	if mode, localRuntimeKind, boundWorkerID, relevant, err := s.resolveExecutionSettingsUpdate(ctx, id, updates); err != nil {
+		return err
+	} else if relevant {
+		updates["execution_mode"] = mode
+		updates["local_runtime_kind"] = store.NullableStringUpdateArg(localRuntimeKind)
+		updates["bound_worker_id"] = store.NullableStringUpdateArg(boundWorkerID)
+	}
 
 	// If setting this agent as default, unset any existing default first (scoped to same tenant).
 	if v, ok := updates["is_default"]; ok {
@@ -237,6 +255,38 @@ func (s *PGAgentStore) Update(ctx context.Context, id uuid.UUID, updates map[str
 		}()
 	}
 	return nil
+}
+
+func (s *PGAgentStore) resolveExecutionSettingsUpdate(ctx context.Context, id uuid.UUID, updates map[string]any) (string, *string, *string, bool, error) {
+	if !store.HasExecutionSettingsUpdate(updates) {
+		return "", nil, nil, false, nil
+	}
+	current, err := s.GetByID(ctx, id)
+	if err != nil {
+		if isSoftDeletedPGAgent(ctx, s.db, id) {
+			return "", nil, nil, false, nil
+		}
+		return "", nil, nil, false, err
+	}
+	return store.ResolveUpdatedAgentExecutionSettings(*current, updates)
+}
+
+func isSoftDeletedPGAgent(ctx context.Context, db *sql.DB, id uuid.UUID) bool {
+	var deletedAt sql.NullTime
+	if store.IsCrossTenant(ctx) {
+		if err := db.QueryRowContext(ctx, `SELECT deleted_at FROM agents WHERE id = $1`, id).Scan(&deletedAt); err != nil {
+			return false
+		}
+		return deletedAt.Valid
+	}
+	tid := store.TenantIDFromContext(ctx)
+	if tid == uuid.Nil {
+		return false
+	}
+	if err := db.QueryRowContext(ctx, `SELECT deleted_at FROM agents WHERE id = $1 AND tenant_id = $2`, id, tid).Scan(&deletedAt); err != nil {
+		return false
+	}
+	return deletedAt.Valid
 }
 
 func (s *PGAgentStore) Delete(ctx context.Context, id uuid.UUID) error {
@@ -477,18 +527,26 @@ type agentRowScanner interface {
 
 func scanAgentRow(row agentRowScanner) (*store.AgentData, error) {
 	var d store.AgentData
-	var frontmatter sql.NullString
+	var frontmatter, executionMode, localRuntimeKind, boundWorkerID sql.NullString
 	// pgx: scan nullable JSONB into *[]byte (NOT *json.RawMessage — pgx can't scan NULL into defined types)
 	var toolsCfg, sandboxCfg, subagentsCfg, memoryCfg, compactionCfg, pruningCfg, otherCfg *[]byte
 	err := row.Scan(&d.ID, &d.AgentKey, &d.DisplayName, &frontmatter, &d.OwnerID, &d.Provider, &d.Model,
 		&d.ContextWindow, &d.MaxToolIterations, &d.Workspace, &d.RestrictToWorkspace,
 		&toolsCfg, &sandboxCfg, &subagentsCfg, &memoryCfg, &compactionCfg, &pruningCfg, &otherCfg,
-		&d.AgentType, &d.IsDefault, &d.Status, &d.BudgetMonthlyCents, &d.CreatedAt, &d.UpdatedAt, &d.TenantID)
+		&d.AgentType, &d.IsDefault, &d.Status, &executionMode, &localRuntimeKind, &boundWorkerID,
+		&d.BudgetMonthlyCents, &d.CreatedAt, &d.UpdatedAt, &d.TenantID)
 	if err != nil {
 		return nil, err
 	}
 	if frontmatter.Valid {
 		d.Frontmatter = frontmatter.String
+	}
+	d.ExecutionMode = store.NormalizeAgentExecutionMode(executionMode.String)
+	if localRuntimeKind.Valid {
+		d.LocalRuntimeKind = localRuntimeKind.String
+	}
+	if boundWorkerID.Valid {
+		d.BoundWorkerID = boundWorkerID.String
 	}
 	// Convert *[]byte → json.RawMessage (nil-safe)
 	if toolsCfg != nil {
@@ -607,7 +665,7 @@ func execMapUpdateWhereTenant(ctx context.Context, db *sql.DB, table string, upd
 	}
 	// $i = id, $i+1 = tenantID
 	args = append(args, id, tenantID)
-	q := fmt.Sprintf("UPDATE %s SET %s WHERE id = $%d AND tenant_id = $%d",
+	q := fmt.Sprintf("UPDATE %s SET %s WHERE id = $%d AND tenant_id = $%d AND deleted_at IS NULL",
 		table, joinStrings(setClauses, ", "), i, i+1)
 	_, err := db.ExecContext(ctx, q, args...)
 	return err

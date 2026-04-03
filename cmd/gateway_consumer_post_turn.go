@@ -177,6 +177,10 @@ func resolveTeamTaskOutcome(
 		slog.Warn("post-turn: loop detector killed member run",
 			"task_id", meta.TaskID, "agent", toAgent)
 
+	case outcome.Result != nil && outcome.Result.Queued:
+		// Local worker dispatch queued the run; completion will arrive later via worker callbacks.
+		slog.Info("post-turn: local worker run queued", "task_id", meta.TaskID, "agent", toAgent)
+
 	default:
 		// Agent turn ended without terminal action — auto-complete.
 		// Covers: Progressed, Commented, Claimed, or no flags at all.

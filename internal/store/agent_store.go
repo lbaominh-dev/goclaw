@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -39,6 +40,11 @@ const (
 	AgentStatusSummonFailed = "summon_failed"
 )
 
+const (
+	AgentExecutionModeServer      = "server"
+	AgentExecutionModeLocalWorker = "local_worker"
+)
+
 // AgentData represents an agent in the database.
 type AgentData struct {
 	BaseModel
@@ -56,6 +62,9 @@ type AgentData struct {
 	AgentType           string    `json:"agent_type"` // "open" or "predefined"
 	IsDefault           bool      `json:"is_default"`
 	Status              string    `json:"status"`
+	ExecutionMode       string    `json:"execution_mode,omitempty"`
+	LocalRuntimeKind    string    `json:"local_runtime_kind,omitempty"`
+	BoundWorkerID       string    `json:"bound_worker_id,omitempty"`
 
 	// Budget: optional monthly spending limit in cents (nil = unlimited)
 	BudgetMonthlyCents *int `json:"budget_monthly_cents,omitempty"`
@@ -68,6 +77,128 @@ type AgentData struct {
 	CompactionConfig json.RawMessage `json:"compaction_config,omitempty"`
 	ContextPruning   json.RawMessage `json:"context_pruning,omitempty"`
 	OtherConfig      json.RawMessage `json:"other_config,omitempty"`
+}
+
+func NormalizeAgentExecutionMode(mode string) string {
+	switch strings.TrimSpace(mode) {
+	case "", AgentExecutionModeServer:
+		return AgentExecutionModeServer
+	case AgentExecutionModeLocalWorker:
+		return AgentExecutionModeLocalWorker
+	default:
+		return strings.TrimSpace(mode)
+	}
+}
+
+func ValidateAgentExecutionSettings(mode, localRuntimeKind, boundWorkerID string) error {
+	mode = NormalizeAgentExecutionMode(mode)
+	localRuntimeKind = strings.TrimSpace(localRuntimeKind)
+	boundWorkerID = strings.TrimSpace(boundWorkerID)
+
+	switch mode {
+	case AgentExecutionModeServer:
+		if localRuntimeKind != "" || boundWorkerID != "" {
+			return fmt.Errorf("server execution mode does not allow local worker fields")
+		}
+		return nil
+	case AgentExecutionModeLocalWorker:
+		if localRuntimeKind == "" || boundWorkerID == "" {
+			return fmt.Errorf("local_worker execution mode requires local_runtime_kind and bound_worker_id")
+		}
+		return nil
+	default:
+		return fmt.Errorf("invalid execution_mode %q", mode)
+	}
+}
+
+func ResolveUpdatedAgentExecutionSettings(current AgentData, updates map[string]any) (string, *string, *string, bool, error) {
+	mode := current.ExecutionMode
+	localRuntimeKind := new(current.LocalRuntimeKind)
+	boundWorkerID := new(current.BoundWorkerID)
+	relevant := false
+
+	if raw, ok := updates["execution_mode"]; ok {
+		s, ok := raw.(string)
+		if !ok {
+			return "", nil, nil, false, fmt.Errorf("execution_mode must be a string")
+		}
+		mode = s
+		relevant = true
+	}
+	if raw, ok := updates["local_runtime_kind"]; ok {
+		v, err := nullableStringUpdateValue(raw, "local_runtime_kind")
+		if err != nil {
+			return "", nil, nil, false, err
+		}
+		localRuntimeKind = v
+		relevant = true
+	}
+	if raw, ok := updates["bound_worker_id"]; ok {
+		v, err := nullableStringUpdateValue(raw, "bound_worker_id")
+		if err != nil {
+			return "", nil, nil, false, err
+		}
+		boundWorkerID = v
+		relevant = true
+	}
+	if !relevant {
+		return "", nil, nil, false, nil
+	}
+
+	mode = NormalizeAgentExecutionMode(mode)
+	localRuntimeKindValue := strings.TrimSpace(derefString(localRuntimeKind))
+	boundWorkerIDValue := strings.TrimSpace(derefString(boundWorkerID))
+	if err := ValidateAgentExecutionSettings(mode, localRuntimeKindValue, boundWorkerIDValue); err != nil {
+		return "", nil, nil, true, err
+	}
+	return mode, nilIfEmpty(localRuntimeKindValue), nilIfEmpty(boundWorkerIDValue), true, nil
+}
+
+func HasExecutionSettingsUpdate(updates map[string]any) bool {
+	if len(updates) == 0 {
+		return false
+	}
+	_, hasMode := updates["execution_mode"]
+	_, hasRuntime := updates["local_runtime_kind"]
+	_, hasWorker := updates["bound_worker_id"]
+	return hasMode || hasRuntime || hasWorker
+}
+
+func nullableStringUpdateValue(raw any, field string) (*string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return nil, fmt.Errorf("%s must be a string", field)
+	}
+	return &s, nil
+}
+
+//go:fix inline
+func stringPtr(s string) *string {
+	return new(s)
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func NullableStringUpdateArg(v *string) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // ParseToolsConfig returns per-agent tool policy, or nil if not configured.
@@ -310,10 +441,10 @@ type WorkspaceSharingConfig struct {
 }
 
 const (
-	ReasoningSourceUnset             = "unset"
-	ReasoningSourceLegacy            = "thinking_level"
-	ReasoningSourceAdvanced          = "reasoning"
-	ReasoningSourceProviderDefault   = "provider_default"
+	ReasoningSourceUnset           = "unset"
+	ReasoningSourceLegacy          = "thinking_level"
+	ReasoningSourceAdvanced        = "reasoning"
+	ReasoningSourceProviderDefault = "provider_default"
 	// Reasoning fallback constants — canonical definitions in providers package.
 	ReasoningFallbackDowngrade       = providers.ReasoningFallbackDowngrade
 	ReasoningFallbackDisable         = providers.ReasoningFallbackDisable

@@ -20,12 +20,13 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/config"
 	httpapi "github.com/nextlevelbuilder/goclaw/internal/http"
+	"github.com/nextlevelbuilder/goclaw/internal/localworker"
 	mcpbridge "github.com/nextlevelbuilder/goclaw/internal/mcp"
-	"github.com/nextlevelbuilder/goclaw/internal/webui"
 	"github.com/nextlevelbuilder/goclaw/internal/permissions"
 	"github.com/nextlevelbuilder/goclaw/internal/providers"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 	"github.com/nextlevelbuilder/goclaw/internal/tools"
+	"github.com/nextlevelbuilder/goclaw/internal/webui"
 	"github.com/nextlevelbuilder/goclaw/pkg/protocol"
 )
 
@@ -50,22 +51,24 @@ type Server struct {
 	// Non-handler dependencies (don't implement RegisterRoutes)
 	policyEngine   *permissions.PolicyEngine
 	pairingService store.PairingStore
-	apiKeyStore    store.APIKeyStore  // for API key auth lookup
-	agentStore     store.AgentStore   // for context injection in tools_invoke
-	msgBus         *bus.MessageBus    // for MCP bridge media delivery
+	apiKeyStore    store.APIKeyStore // for API key auth lookup
+	agentStore     store.AgentStore  // for context injection in tools_invoke
+	workerStore    store.WorkerStore
+	msgBus         *bus.MessageBus // for MCP bridge media delivery
 
 	upgrader    websocket.Upgrader
 	rateLimiter *RateLimiter
 	clients     map[string]*Client
 	mu          sync.RWMutex
 
-	startedAt      time.Time
-	version        string
-	db             interface{ PingContext(context.Context) error } // for health check DB ping
-	updateChecker  *UpdateChecker
+	startedAt     time.Time
+	version       string
+	db            interface{ PingContext(context.Context) error } // for health check DB ping
+	updateChecker *UpdateChecker
 
-	logTee   *LogTee                  // optional; auto-unsubscribes clients on disconnect
+	logTee   *LogTee                 // optional; auto-unsubscribes clients on disconnect
 	postTurn tools.PostTurnProcessor // optional; for team task dispatch in HTTP API paths
+	workers  *localworker.Manager
 
 	httpServer *http.Server
 	mux        *http.ServeMux
@@ -74,6 +77,11 @@ type Server struct {
 // SetPostTurnProcessor sets the post-turn processor for team task dispatch in HTTP API handlers.
 func (s *Server) SetPostTurnProcessor(pt tools.PostTurnProcessor) {
 	s.postTurn = pt
+}
+
+// PostTurnProcessor returns the optional post-turn processor.
+func (s *Server) PostTurnProcessor() tools.PostTurnProcessor {
+	return s.postTurn
 }
 
 // NewServer creates a new gateway server.
@@ -498,6 +506,12 @@ func (s *Server) SetEditionHandler(h *httpapi.EditionHandler) { s.handlers = app
 // SetAgentStore sets the agent store for context injection in tools_invoke.
 func (s *Server) SetAgentStore(as store.AgentStore) { s.agentStore = as }
 
+// SetLocalWorkerManager attaches the in-memory local worker connection manager.
+func (s *Server) SetLocalWorkerManager(m *localworker.Manager) { s.workers = m }
+
+// SetWorkerStore attaches worker persistence used by worker WS lifecycle cleanup.
+func (s *Server) SetWorkerStore(ws store.WorkerStore) { s.workerStore = ws }
+
 // SetMessageBus sets the message bus for MCP bridge media delivery.
 func (s *Server) SetMessageBus(mb *bus.MessageBus) { s.msgBus = mb }
 
@@ -578,11 +592,23 @@ func (s *Server) unregisterClient(c *Client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.clients, c.id)
+	if s.workers != nil && c.tenantID != uuid.Nil && c.registeredWorkerID != "" {
+		if s.workers.DisconnectIfConnection(c.tenantID, c.registeredWorkerID, c) && s.workerStore != nil {
+			if err := s.workerStore.SetWorkerStatus(store.WithTenantID(context.Background(), c.tenantID), c.registeredWorkerID, store.WorkerStatusOffline); err != nil {
+				slog.Warn("worker.disconnect_persist_failed", "client", c.id, "worker_id", c.registeredWorkerID, "error", err)
+			}
+		}
+	}
 	s.eventPub.Unsubscribe(c.id)
 	if s.logTee != nil {
 		s.logTee.Unsubscribe(c.id)
 	}
 	slog.Info("client disconnected", "id", c.id)
+}
+
+// TestOnlyUnregisterClient exposes disconnect cleanup for package-external tests.
+func (s *Server) TestOnlyUnregisterClient(c *Client) {
+	s.unregisterClient(c)
 }
 
 // SetLogTee attaches a LogTee so that disconnecting clients are auto-unsubscribed.

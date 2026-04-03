@@ -9,6 +9,7 @@ import { ModelBudgetSection } from "./overview-sections/model-budget-section";
 import { SkillsSection } from "./overview-sections/skills-section";
 import { EvolutionSection } from "./overview-sections/evolution-section";
 import { CapabilitiesSection } from "./overview-sections/capabilities-section";
+import { ExecutionSection } from "./overview-sections/execution-section";
 import { ChatGPTOAuthRoutingSummarySection } from "./overview-sections/chatgpt-oauth-routing-summary-section";
 import { HeartbeatCard } from "./overview-sections/heartbeat-card";
 import { MemorySection } from "./config-sections";
@@ -32,6 +33,9 @@ export function AgentOverviewTab({ agent, onUpdate, heartbeat, onManageCodexPool
   const [frontmatter, setFrontmatter] = useState(agent.frontmatter ?? "");
   const [status, setStatus] = useState(agent.status);
   const [isDefault, setIsDefault] = useState(agent.is_default);
+  const [executionMode, setExecutionMode] = useState(agent.execution_mode ?? "server");
+  const [localRuntimeKind, setLocalRuntimeKind] = useState(agent.local_runtime_kind ?? "");
+  const [boundWorkerId, setBoundWorkerId] = useState(agent.bound_worker_id ?? "");
 
   // Model & Budget
   const [provider, setProvider] = useState(agent.provider);
@@ -88,6 +92,9 @@ export function AgentOverviewTab({ agent, onUpdate, heartbeat, onManageCodexPool
         is_default: isDefault,
         other_config: updatedOtherConfig,
         budget_monthly_cents: budgetCents,
+        execution_mode: executionMode,
+        local_runtime_kind: executionMode === "local_worker" ? localRuntimeKind.trim() : null,
+        bound_worker_id: executionMode === "local_worker" ? boundWorkerId.trim() : null,
         memory_config: mem,
         subagents_config: subEnabled ? sub : null,
         tools_config: toolsEnabled
@@ -133,6 +140,15 @@ export function AgentOverviewTab({ agent, onUpdate, heartbeat, onManageCodexPool
         onSaveBlockedChange={setLlmSaveBlocked}
       />
 
+      <ExecutionSection
+        executionMode={executionMode}
+        onExecutionModeChange={setExecutionMode}
+        localRuntimeKind={localRuntimeKind}
+        onLocalRuntimeKindChange={setLocalRuntimeKind}
+        boundWorkerId={boundWorkerId}
+        onBoundWorkerIdChange={setBoundWorkerId}
+      />
+
       <ChatGPTOAuthRoutingSummarySection agent={agent} onManage={onManageCodexPool} />
       {provider !== agent.provider && !!otherCfg.chatgpt_oauth_routing && (
         <p className="text-xs text-amber-600 dark:text-amber-400 -mt-2 px-1">
@@ -175,7 +191,7 @@ export function AgentOverviewTab({ agent, onUpdate, heartbeat, onManageCodexPool
       <StickySaveBar
         onSave={handleSave}
         saving={saving}
-        disabled={llmSaveBlocked}
+        disabled={llmSaveBlocked || (executionMode === "local_worker" && (!localRuntimeKind.trim() || !boundWorkerId.trim()))}
         label={t("general.saveChanges")}
         savingLabel={t("general.saving")}
       />

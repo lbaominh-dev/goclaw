@@ -10,6 +10,7 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/bootstrap"
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/config"
+	"github.com/nextlevelbuilder/goclaw/internal/localworker"
 	mcpbridge "github.com/nextlevelbuilder/goclaw/internal/mcp"
 	"github.com/nextlevelbuilder/goclaw/internal/media"
 	"github.com/nextlevelbuilder/goclaw/internal/providers"
@@ -71,6 +72,9 @@ type Loop struct {
 	agentType        string    // "open" or "predefined"
 	provider         providers.Provider
 	model            string
+	executionMode    string
+	localRuntimeKind string
+	boundWorkerID    string
 	contextWindow    int
 	maxTokens        int // max output tokens per LLM call (0 = default 8192)
 	maxIterations    int
@@ -180,6 +184,9 @@ type Loop struct {
 
 	// Memory store for extractive memory fallback (writes directly when LLM flush fails)
 	memStore store.MemoryStore
+
+	// Local worker execution path (nil for normal server-run agents).
+	localWorkerDispatcher *localworker.Dispatcher
 }
 
 // AgentEvent is emitted during agent execution for WS broadcasting.
@@ -211,6 +218,9 @@ type LoopConfig struct {
 	ID               string
 	Provider         providers.Provider
 	Model            string
+	ExecutionMode    string
+	LocalRuntimeKind string
+	BoundWorkerID    string
 	ContextWindow    int
 	MaxTokens        int // max output tokens per LLM call (0 = default 8192)
 	MaxIterations    int
@@ -316,6 +326,8 @@ type LoopConfig struct {
 	MCPStore        store.MCPServerStore  // for credential lookup
 	MCPPool         *mcpbridge.Pool       // user-keyed connection pool
 	MCPUserCredSrvs []store.MCPAccessInfo // servers needing per-user creds
+
+	LocalWorkerDispatcher *localworker.Dispatcher
 }
 
 const defaultMaxTokens = config.DefaultMaxTokens
@@ -358,6 +370,9 @@ func NewLoop(cfg LoopConfig) *Loop {
 		agentType:              cfg.AgentType,
 		provider:               cfg.Provider,
 		model:                  cfg.Model,
+		executionMode:          cfg.ExecutionMode,
+		localRuntimeKind:       cfg.LocalRuntimeKind,
+		boundWorkerID:          cfg.BoundWorkerID,
 		contextWindow:          cfg.ContextWindow,
 		maxTokens:              cfg.MaxTokens,
 		maxIterations:          cfg.MaxIterations,
@@ -413,6 +428,7 @@ func NewLoop(cfg LoopConfig) *Loop {
 		mcpStore:               cfg.MCPStore,
 		mcpPool:                cfg.MCPPool,
 		mcpUserCredSrvs:        cfg.MCPUserCredSrvs,
+		localWorkerDispatcher:  cfg.LocalWorkerDispatcher,
 	}
 }
 
@@ -477,6 +493,7 @@ type RunResult struct {
 	RunID          string           `json:"runId"`
 	Iterations     int              `json:"iterations"`
 	Usage          *providers.Usage `json:"usage,omitempty"`
+	Queued         bool             `json:"queued,omitempty"`
 	Media          []MediaResult    `json:"media,omitempty"`          // media files from tool results (MEDIA: prefix)
 	Deliverables   []string         `json:"deliverables,omitempty"`   // actual content from tool outputs (for team task results)
 	BlockReplies   int              `json:"blockReplies,omitempty"`   // number of block.reply events emitted

@@ -1,4 +1,4 @@
--- GoClaw SQLite Schema (auto-translated from PG migrations 000001-000029)
+-- GoClaw SQLite Schema (auto-translated from PG migrations 000001-000036)
 --
 -- Translation rules applied:
 --   UUID          → TEXT (36-char string)
@@ -119,6 +119,9 @@ CREATE TABLE IF NOT EXISTS agents (
     is_default            BOOLEAN NOT NULL DEFAULT 0,
     agent_type            VARCHAR(20) NOT NULL DEFAULT 'open',
     status                VARCHAR(20) DEFAULT 'active',
+    execution_mode        VARCHAR(32) NOT NULL DEFAULT 'server',
+    local_runtime_kind    TEXT,
+    bound_worker_id       TEXT,
     frontmatter           TEXT,
     budget_monthly_cents  INTEGER,
     tenant_id             TEXT NOT NULL REFERENCES tenants(id),
@@ -133,6 +136,7 @@ CREATE INDEX IF NOT EXISTS idx_agents_owner ON agents(owner_id) WHERE deleted_at
 CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_agents_tenant ON agents(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_agents_tenant_active ON agents(tenant_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_agents_tenant_bound_worker ON agents(tenant_id, bound_worker_id) WHERE bound_worker_id IS NOT NULL;
 
 -- ============================================================
 -- Table: agent_shares
@@ -1313,6 +1317,48 @@ CREATE TABLE IF NOT EXISTS system_configs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_system_configs_tenant ON system_configs(tenant_id);
+
+-- ============================================================
+-- Table: local_workers
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS local_workers (
+    id                TEXT PRIMARY KEY,
+    tenant_id         TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    worker_id         TEXT NOT NULL,
+    runtime_kind      TEXT NOT NULL,
+    display_name      TEXT,
+    status            TEXT NOT NULL DEFAULT 'online',
+    last_heartbeat_at TEXT,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(tenant_id, worker_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_workers_tenant_worker ON local_workers(tenant_id, worker_id);
+
+-- ============================================================
+-- Table: local_worker_jobs
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS local_worker_jobs (
+    id           TEXT PRIMARY KEY,
+    tenant_id    TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    worker_id    TEXT NOT NULL,
+    agent_id     TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    task_id      TEXT,
+    job_type     TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'queued',
+    payload      TEXT NOT NULL DEFAULT '{}',
+    result       TEXT,
+    started_at   TEXT,
+    completed_at TEXT,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_tenant_worker_status ON local_worker_jobs(tenant_id, worker_id, status);
+CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_tenant_task ON local_worker_jobs(tenant_id, task_id) WHERE task_id IS NOT NULL;
 
 -- ============================================================
 -- Table: subagent_tasks

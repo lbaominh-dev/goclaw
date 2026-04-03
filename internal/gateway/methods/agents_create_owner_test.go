@@ -3,7 +3,10 @@ package methods
 import (
 	"context"
 	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/google/uuid"
 
@@ -107,6 +110,7 @@ func (s *createCaptureStore) EnsureUserProfile(_ context.Context, _ uuid.UUID, _
 func (s *createCaptureStore) PropagateContextFile(_ context.Context, _ uuid.UUID, _ string) (int, error) {
 	return 0, nil
 }
+
 // ---- helpers ----
 
 // minimalConfig returns a config sufficient for handleCreate (provider + model defaults only).
@@ -135,6 +139,30 @@ func buildCreateRequest(t *testing.T, params map[string]any) *protocol.RequestFr
 // safely falls to the select default branch — no panic, response silently dropped.
 func nullClient() *gateway.Client {
 	return &gateway.Client{}
+}
+
+func responseClient() *gateway.Client {
+	client := &gateway.Client{}
+	sendField := reflect.ValueOf(client).Elem().FieldByName("send")
+	reflect.NewAt(sendField.Type(), unsafe.Pointer(sendField.UnsafeAddr())).Elem().Set(reflect.ValueOf(make(chan []byte, 1)))
+	return client
+}
+
+func readResponse(t *testing.T, client *gateway.Client) *protocol.ResponseFrame {
+	t.Helper()
+	sendField := reflect.ValueOf(client).Elem().FieldByName("send")
+	send := reflect.NewAt(sendField.Type(), unsafe.Pointer(sendField.UnsafeAddr())).Elem().Interface().(chan []byte)
+	select {
+	case raw := <-send:
+		var resp protocol.ResponseFrame
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("unmarshal response: %v", err)
+		}
+		return &resp
+	default:
+		t.Fatal("expected response, got none")
+		return nil
+	}
 }
 
 // newManagedMethods returns AgentsMethods wired with the given stub store.
@@ -233,5 +261,97 @@ func TestHandleCreate_MultipleOwnerIDs_UsesFirst(t *testing.T) {
 	}
 	if stub.created.OwnerID != "first-owner" {
 		t.Errorf("OwnerID = %q, want %q", stub.created.OwnerID, "first-owner")
+	}
+}
+
+func TestHandleCreate_AllowsLocalWorkerMember(t *testing.T) {
+	stub := &createCaptureStore{}
+	m := newManagedMethods(t, stub)
+
+	req := buildCreateRequest(t, map[string]any{
+		"name":               "Local Worker Agent",
+		"execution_mode":     store.AgentExecutionModeLocalWorker,
+		"local_runtime_kind": "docker",
+		"bound_worker_id":    "worker-123",
+	})
+
+	m.handleCreate(context.Background(), nullClient(), req)
+
+	if stub.created == nil {
+		t.Fatal("agentStore.Create was not called")
+	}
+	if stub.created.ExecutionMode != store.AgentExecutionModeLocalWorker {
+		t.Fatalf("ExecutionMode = %q, want %q", stub.created.ExecutionMode, store.AgentExecutionModeLocalWorker)
+	}
+	if stub.created.LocalRuntimeKind != "docker" {
+		t.Fatalf("LocalRuntimeKind = %q, want %q", stub.created.LocalRuntimeKind, "docker")
+	}
+	if stub.created.BoundWorkerID != "worker-123" {
+		t.Fatalf("BoundWorkerID = %q, want %q", stub.created.BoundWorkerID, "worker-123")
+	}
+}
+
+func TestHandleCreate_RejectsInvalidLocalWorkerConfig(t *testing.T) {
+	stub := &createCaptureStore{}
+	m := newManagedMethods(t, stub)
+	client := responseClient()
+
+	req := buildCreateRequest(t, map[string]any{
+		"name":               "Broken Local Worker Agent",
+		"execution_mode":     store.AgentExecutionModeLocalWorker,
+		"local_runtime_kind": "docker",
+	})
+
+	m.handleCreate(context.Background(), client, req)
+
+	if stub.created != nil {
+		t.Fatal("agentStore.Create should not be called for invalid local worker config")
+	}
+
+	resp := readResponse(t, client)
+	if resp.OK {
+		t.Fatal("expected error response for invalid local worker config")
+	}
+	if resp.Error == nil {
+		t.Fatal("expected error details in response")
+	}
+	if resp.Error.Code != protocol.ErrInvalidRequest {
+		t.Fatalf("error code = %q, want %q", resp.Error.Code, protocol.ErrInvalidRequest)
+	}
+	if !strings.Contains(resp.Error.Message, "local_runtime_kind and bound_worker_id") {
+		t.Fatalf("error message = %q, want local worker validation failure", resp.Error.Message)
+	}
+}
+
+func TestHandleCreate_RejectsMalformedLocalWorkerConfig(t *testing.T) {
+	stub := &createCaptureStore{}
+	m := newManagedMethods(t, stub)
+	client := responseClient()
+
+	req := buildCreateRequest(t, map[string]any{
+		"name":               "Malformed Local Worker Agent",
+		"execution_mode":     123,
+		"local_runtime_kind": "docker",
+		"bound_worker_id":    "worker-123",
+	})
+
+	m.handleCreate(context.Background(), client, req)
+
+	if stub.created != nil {
+		t.Fatal("agentStore.Create should not be called for malformed local worker config")
+	}
+
+	resp := readResponse(t, client)
+	if resp.OK {
+		t.Fatal("expected error response for malformed local worker config")
+	}
+	if resp.Error == nil {
+		t.Fatal("expected error details in response")
+	}
+	if resp.Error.Code != protocol.ErrInvalidRequest {
+		t.Fatalf("error code = %q, want %q", resp.Error.Code, protocol.ErrInvalidRequest)
+	}
+	if !strings.Contains(resp.Error.Message, "execution_mode") {
+		t.Fatalf("error message = %q, want malformed execution_mode failure", resp.Error.Message)
 	}
 }

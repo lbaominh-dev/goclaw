@@ -22,18 +22,21 @@ import (
 func (m *AgentsMethods) handleUpdate(ctx context.Context, client *gateway.Client, req *protocol.RequestFrame) {
 	locale := store.LocaleFromContext(ctx)
 	var params struct {
-		AgentID           string `json:"agentId"`
-		Name              string `json:"name"`
-		Workspace         string `json:"workspace"`
-		Provider          string `json:"provider"`
-		Model             string `json:"model"`
-		Avatar            string `json:"avatar"`
-		Status            string `json:"status"`
-		Frontmatter       string `json:"frontmatter"`
-		ContextWindow     *int   `json:"context_window"`
-		MaxToolIterations *int   `json:"max_tool_iterations"`
-		IsDefault         *bool  `json:"is_default"`
-		BudgetCents       *int   `json:"budget_monthly_cents"`
+		AgentID           string          `json:"agentId"`
+		Name              string          `json:"name"`
+		Workspace         string          `json:"workspace"`
+		Provider          string          `json:"provider"`
+		Model             string          `json:"model"`
+		Avatar            string          `json:"avatar"`
+		Status            string          `json:"status"`
+		Frontmatter       string          `json:"frontmatter"`
+		ContextWindow     *int            `json:"context_window"`
+		MaxToolIterations *int            `json:"max_tool_iterations"`
+		IsDefault         *bool           `json:"is_default"`
+		BudgetCents       *int            `json:"budget_monthly_cents"`
+		ExecutionMode     json.RawMessage `json:"execution_mode"`
+		LocalRuntimeKind  json.RawMessage `json:"local_runtime_kind"`
+		BoundWorkerID     json.RawMessage `json:"bound_worker_id"`
 		// Per-agent config overrides
 		ToolsConfig      json.RawMessage `json:"tools_config,omitempty"`
 		SubagentsConfig  json.RawMessage `json:"subagents_config,omitempty"`
@@ -93,6 +96,38 @@ func (m *AgentsMethods) handleUpdate(ctx context.Context, client *gateway.Client
 		if params.BudgetCents != nil {
 			updates["budget_monthly_cents"] = *params.BudgetCents
 		}
+		if len(params.ExecutionMode) > 0 {
+			var mode string
+			if err := json.Unmarshal(params.ExecutionMode, &mode); err != nil {
+				client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, "execution_mode must be a string"))
+				return
+			}
+			updates["execution_mode"] = mode
+		}
+		if len(params.LocalRuntimeKind) > 0 {
+			var value *string
+			if string(params.LocalRuntimeKind) != "null" {
+				var s string
+				if err := json.Unmarshal(params.LocalRuntimeKind, &s); err != nil {
+					client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, "local_runtime_kind must be a string"))
+					return
+				}
+				value = &s
+			}
+			updates["local_runtime_kind"] = store.NullableStringUpdateArg(value)
+		}
+		if len(params.BoundWorkerID) > 0 {
+			var value *string
+			if string(params.BoundWorkerID) != "null" {
+				var s string
+				if err := json.Unmarshal(params.BoundWorkerID, &s); err != nil {
+					client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, "bound_worker_id must be a string"))
+					return
+				}
+				value = &s
+			}
+			updates["bound_worker_id"] = store.NullableStringUpdateArg(value)
+		}
 		// Per-agent JSONB config overrides
 		if len(params.ToolsConfig) > 0 {
 			updates["tools_config"] = []byte(params.ToolsConfig)
@@ -114,6 +149,16 @@ func (m *AgentsMethods) handleUpdate(ctx context.Context, client *gateway.Client
 		}
 		if len(params.OtherConfig) > 0 {
 			updates["other_config"] = []byte(params.OtherConfig)
+		}
+		mode, localRuntimeKind, boundWorkerID, relevant, err := store.ResolveUpdatedAgentExecutionSettings(*ag, updates)
+		if err != nil {
+			client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, err.Error()))
+			return
+		}
+		if relevant {
+			updates["execution_mode"] = mode
+			updates["local_runtime_kind"] = store.NullableStringUpdateArg(localRuntimeKind)
+			updates["bound_worker_id"] = store.NullableStringUpdateArg(boundWorkerID)
 		}
 
 		if len(updates) > 0 {

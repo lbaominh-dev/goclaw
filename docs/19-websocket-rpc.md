@@ -193,6 +193,18 @@ Update agent properties (admin only).
 **Request:** `{agentId, name?, model?, avatar?, tools_config?, ...}`
 **Response:** `{ok: true, agentId}`
 
+Agent create/update also support local-backed execution settings:
+
+```json
+{
+  "execution_mode": "local_worker",
+  "local_runtime_kind": "claude_cli",
+  "bound_worker_id": "worker-mbp-01"
+}
+```
+
+Use `execution_mode: "server"` to keep normal server-side execution.
+
 ### `agents.delete`
 
 Delete an agent (admin only).
@@ -218,6 +230,96 @@ Delete an agent (admin only).
 | `agents.links.create` | Create agent link |
 | `agents.links.update` | Update agent link |
 | `agents.links.delete` | Delete agent link |
+
+---
+
+## 4. Local Workers
+
+Local workers are authenticated WebSocket clients that execute local-backed member agents on a bound machine.
+
+### `workers.register`
+
+Register the current authenticated WebSocket connection as a live local worker for its tenant.
+
+**Request:**
+
+```json
+{
+  "workerId": "worker-mbp-01",
+  "runtimeKind": "claude_cli",
+  "displayName": "Minh MacBook"
+}
+```
+
+**Response:**
+
+```json
+{
+  "workerId": "worker-mbp-01",
+  "status": "online"
+}
+```
+
+### `workers.job.started`
+
+Worker acknowledges that a queued job has started running locally.
+
+**Request:** `{jobId}`
+
+### `workers.job.output`
+
+Worker sends observational output/progress text for a job.
+
+**Request:**
+
+```json
+{
+  "jobId": "uuid",
+  "output": {"line": "running tests..."}
+}
+```
+
+This output is treated as observational progress only. The server does not execute or interpret tool calls embedded in worker output.
+
+### `workers.job.status`
+
+Worker sends a structured status/progress update for a job.
+
+**Request:**
+
+```json
+{
+  "jobId": "uuid",
+  "status": "running_tests",
+  "detail": {"percent": 60, "message": "unit tests in progress"}
+}
+```
+
+### `workers.job.completed`
+
+Worker reports successful job completion.
+
+**Request:**
+
+```json
+{
+  "jobId": "uuid",
+  "result": {"summary": "implemented change and tests pass"}
+}
+```
+
+### `workers.job.failed`
+
+Worker reports terminal job failure.
+
+**Request:**
+
+```json
+{
+  "jobId": "uuid",
+  "error": {"message": "test suite failed", "code": "EFAIL"}
+}
+```
 
 ---
 

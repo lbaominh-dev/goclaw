@@ -44,14 +44,15 @@ func NewSQLiteStores(cfg store.StoreConfig) (*store.Stores, error) {
 		Pairing:               NewSQLitePairingStore(db),
 		PendingMessages:       NewSQLitePendingMessageStore(db),
 		Contacts:              NewSQLiteContactStore(db),
-		Teams:  NewSQLiteTeamStore(db),
-		Skills: NewSQLiteSkillStore(db, cfg.SkillsStorageDir),
-		MCP:    NewSQLiteMCPServerStore(db, cfg.EncryptionKey),
-		Activity:         NewSQLiteActivityStore(db),
-		APIKeys:          NewSQLiteAPIKeyStore(db),
-		ConfigPermissions: NewSQLiteConfigPermissionStore(db),
-		Memory:         NewSQLiteMemoryStore(db),
-		SubagentTasks:  NewSQLiteSubagentTaskStore(),
+		Teams:                 NewSQLiteTeamStore(db),
+		Skills:                NewSQLiteSkillStore(db, cfg.SkillsStorageDir),
+		MCP:                   NewSQLiteMCPServerStore(db, cfg.EncryptionKey),
+		Activity:              NewSQLiteActivityStore(db),
+		APIKeys:               NewSQLiteAPIKeyStore(db),
+		ConfigPermissions:     NewSQLiteConfigPermissionStore(db),
+		Memory:                NewSQLiteMemoryStore(db),
+		SubagentTasks:         NewSQLiteSubagentTaskStore(),
+		Workers:               NewSQLiteWorkerStore(db),
 		// Phase 2 Batch B+C stores (nil = gracefully skipped by gateway):
 		// AgentLinks, KnowledgeGraph, SecureCLI
 	}, nil

@@ -12,6 +12,7 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/bootstrap"
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/config"
+	"github.com/nextlevelbuilder/goclaw/internal/localworker"
 	mcpbridge "github.com/nextlevelbuilder/goclaw/internal/mcp"
 	"github.com/nextlevelbuilder/goclaw/internal/media"
 	"github.com/nextlevelbuilder/goclaw/internal/providerresolve"
@@ -101,6 +102,9 @@ type ResolverDeps struct {
 
 	// Global workspace root (GOCLAW_WORKSPACE)
 	Workspace string
+
+	// Local worker execution backend for execution_mode=local_worker.
+	LocalWorkerDispatcher *localworker.Dispatcher
 }
 
 // NewManagedResolver creates a ResolverFunc that builds Loops from DB agent data.
@@ -365,6 +369,9 @@ func NewManagedResolver(deps ResolverDeps) ResolverFunc {
 			AgentType:              ag.AgentType,
 			Provider:               provider,
 			Model:                  ag.Model,
+			ExecutionMode:          ag.ExecutionMode,
+			LocalRuntimeKind:       ag.LocalRuntimeKind,
+			BoundWorkerID:          ag.BoundWorkerID,
 			ContextWindow:          contextWindow,
 			MaxTokens:              ag.ParseMaxTokens(),
 			MaxIterations:          maxIter,
@@ -416,6 +423,7 @@ func NewManagedResolver(deps ResolverDeps) ResolverFunc {
 			MCPStore:               deps.MCPStore,
 			MCPPool:                deps.MCPPool,
 			MCPUserCredSrvs:        mcpUserCredSrvs,
+			LocalWorkerDispatcher:  deps.LocalWorkerDispatcher,
 		})
 
 		slog.Info("resolved agent from DB", "agent", agentKey, "model", ag.Model, "provider", ag.Provider)

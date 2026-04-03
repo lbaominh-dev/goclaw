@@ -28,9 +28,10 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/config"
 	"github.com/nextlevelbuilder/goclaw/internal/edition"
 	"github.com/nextlevelbuilder/goclaw/internal/gateway"
-	"github.com/nextlevelbuilder/goclaw/internal/heartbeat"
 	"github.com/nextlevelbuilder/goclaw/internal/gateway/methods"
+	"github.com/nextlevelbuilder/goclaw/internal/heartbeat"
 	httpapi "github.com/nextlevelbuilder/goclaw/internal/http"
+	"github.com/nextlevelbuilder/goclaw/internal/localworker"
 	mcpbridge "github.com/nextlevelbuilder/goclaw/internal/mcp"
 	"github.com/nextlevelbuilder/goclaw/internal/media"
 	"github.com/nextlevelbuilder/goclaw/internal/providers"
@@ -329,10 +330,13 @@ func runGateway() {
 
 	// Create gateway server and wire enforcement
 	server := gateway.NewServer(cfg, msgBus, agentRouter, pgStores.Sessions, toolsReg)
+	workerManager := localworker.NewManager()
 	server.SetVersion(Version)
 	server.SetDB(pgStores.DB)
 	server.SetPolicyEngine(permPE)
 	server.SetPairingService(pgStores.Pairing)
+	server.SetLocalWorkerManager(workerManager)
+	server.SetWorkerStore(pgStores.Workers)
 	server.SetMessageBus(msgBus)
 	server.SetOAuthHandler(httpapi.NewOAuthHandler(pgStores.Providers, pgStores.ConfigSecrets, providerRegistry, msgBus))
 
@@ -349,7 +353,7 @@ func runGateway() {
 	var mcpPool *mcpbridge.Pool
 	var mediaStore *media.Store
 	var postTurn tools.PostTurnProcessor
-	contextFileInterceptor, mcpPool, mediaStore, postTurn = wireExtras(pgStores, agentRouter, providerRegistry, msgBus, pgStores.Sessions, toolsReg, toolPE, skillsLoader, hasMemory, traceCollector, workspace, cfg.Gateway.InjectionAction, cfg, sandboxMgr, redisClient)
+	contextFileInterceptor, mcpPool, mediaStore, postTurn = wireExtras(pgStores, agentRouter, providerRegistry, msgBus, pgStores.Sessions, toolsReg, toolPE, skillsLoader, hasMemory, traceCollector, workspace, cfg.Gateway.InjectionAction, cfg, sandboxMgr, workerManager, redisClient)
 	if mcpPool != nil {
 		defer mcpPool.Stop()
 	}
@@ -510,7 +514,7 @@ func runGateway() {
 
 	// Register all RPC methods
 	server.SetLogTee(logTee)
-	pairingMethods, heartbeatMethods, chatMethods := registerAllMethods(server, agentRouter, pgStores.Sessions, pgStores.Cron, pgStores.Pairing, cfg, cfgPath, workspace, dataDir, msgBus, execApprovalMgr, pgStores.Agents, pgStores.Skills, pgStores.ConfigSecrets, pgStores.Teams, contextFileInterceptor, logTee, pgStores.Heartbeats, pgStores.ConfigPermissions, pgStores.SystemConfigs, pgStores.Tenants, pgStores.SkillTenantCfgs)
+	pairingMethods, heartbeatMethods, chatMethods := registerAllMethods(server, agentRouter, pgStores.Sessions, pgStores.Cron, pgStores.Pairing, cfg, cfgPath, workspace, dataDir, msgBus, execApprovalMgr, pgStores.Agents, pgStores.Skills, pgStores.ConfigSecrets, pgStores.Teams, contextFileInterceptor, logTee, pgStores.Heartbeats, pgStores.ConfigPermissions, pgStores.SystemConfigs, pgStores.Tenants, pgStores.SkillTenantCfgs, pgStores.Workers, workerManager)
 
 	// Wire post-turn processor for team task dispatch (WS chat.send + HTTP API paths).
 	if postTurn != nil {

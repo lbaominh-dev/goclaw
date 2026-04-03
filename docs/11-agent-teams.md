@@ -116,6 +116,27 @@ Members get a simpler version:
 - How to send progress updates to the lead via mailbox
 - Available task board actions (list, get, search — no create/delegate)
 
+### Local-Backed Members
+
+Member agents can now run in two execution modes:
+
+- `server`: GoClaw executes the member run through the normal provider-backed agent loop
+- `local_worker`: GoClaw keeps the same team/task orchestration, but dispatches the member run to a bound local worker connected over WebSocket
+
+From the lead's point of view, a local-backed member is still just a normal team member:
+
+- the lead creates and assigns tasks the same way
+- the task stays on the same board
+- progress and final result still flow through the same team task lifecycle
+
+The difference is only the execution backend. A local-backed member requires:
+
+- `execution_mode = local_worker`
+- a fixed `local_runtime_kind` such as `claude_cli` or `opencode`
+- a fixed `bound_worker_id`
+
+If the bound worker is offline when the run starts, the delegated member run fails fast instead of falling back to server execution.
+
 ---
 
 ## 4. Task Board

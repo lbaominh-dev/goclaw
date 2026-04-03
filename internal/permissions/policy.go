@@ -181,6 +181,7 @@ func isAdminMethod(method string) bool {
 		protocol.MethodAPIKeysCreate,
 		protocol.MethodAPIKeysRevoke,
 		protocol.MethodSkillsUpdate,
+		protocol.MethodWorkersRegister,
 	}
 	return slices.Contains(adminMethods, method)
 }
@@ -206,6 +207,11 @@ func isWriteMethod(method string) bool {
 		protocol.MethodTeamsTaskComment,
 		protocol.MethodTeamsTaskCreate,
 		protocol.MethodTeamsTaskAssign,
+		protocol.MethodWorkersJobStarted,
+		protocol.MethodWorkersJobOutput,
+		protocol.MethodWorkersJobStatus,
+		protocol.MethodWorkersJobCompleted,
+		protocol.MethodWorkersJobFailed,
 	}
 	for _, prefix := range writePrefixes {
 		if strings.HasPrefix(method, prefix) {

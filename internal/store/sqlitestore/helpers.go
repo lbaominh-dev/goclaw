@@ -164,6 +164,31 @@ func execMapUpdate(ctx context.Context, db *sql.DB, table string, id uuid.UUID, 
 	return err
 }
 
+// execMapUpdateWhere builds and runs a dynamic UPDATE with a custom WHERE clause.
+func execMapUpdateWhere(ctx context.Context, db *sql.DB, table string, updates map[string]any, whereClause string, whereArgs ...any) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	var setClauses []string
+	var args []any
+	for col, val := range updates {
+		if !validColumnName.MatchString(col) {
+			slog.Warn("security.invalid_column_name", "table", table, "column", col)
+			return fmt.Errorf("invalid column name: %q", col)
+		}
+		setClauses = append(setClauses, col+" = ?")
+		args = append(args, sqliteVal(val))
+	}
+	if _, ok := updates["updated_at"]; !ok && tableHasUpdatedAt(table) {
+		setClauses = append(setClauses, "updated_at = ?")
+		args = append(args, time.Now().UTC())
+	}
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s WHERE %s", table, strings.Join(setClauses, ", "), whereClause)
+	_, err := db.ExecContext(ctx, q, args...)
+	return err
+}
+
 var tablesWithUpdatedAt = map[string]bool{
 	"agents": true, "llm_providers": true, "sessions": true,
 	"channel_instances": true, "cron_jobs": true,
@@ -218,7 +243,7 @@ func execMapUpdateWhereTenant(ctx context.Context, db *sql.DB, table string, upd
 		args = append(args, time.Now().UTC())
 	}
 	args = append(args, id, tenantID)
-	q := fmt.Sprintf("UPDATE %s SET %s WHERE id = ? AND tenant_id = ?",
+	q := fmt.Sprintf("UPDATE %s SET %s WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL",
 		table, strings.Join(setClauses, ", "))
 	_, err := db.ExecContext(ctx, q, args...)
 	return err

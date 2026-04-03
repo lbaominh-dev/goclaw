@@ -30,11 +30,11 @@ type AgentsHandler struct {
 	tracingStore     store.TracingStore
 	memoryStore      store.MemoryStore         // for import (nil = disabled)
 	kgStore          store.KnowledgeGraphStore // for import (nil = disabled)
-	defaultWorkspace string                   // default workspace path template (e.g. "~/.goclaw/workspace")
-	dataDir          string                   // resolved data directory (e.g. "~/.goclaw/data") — for team workspace export
-	msgBus           *bus.MessageBus          // for cache invalidation events (nil = no events)
-	summoner         *AgentSummoner           // LLM-based agent setup (nil = disabled)
-	isOwner          func(string) bool        // checks if user ID is a system owner (nil = no owners configured)
+	defaultWorkspace string                    // default workspace path template (e.g. "~/.goclaw/workspace")
+	dataDir          string                    // resolved data directory (e.g. "~/.goclaw/data") — for team workspace export
+	msgBus           *bus.MessageBus           // for cache invalidation events (nil = no events)
+	summoner         *AgentSummoner            // LLM-based agent setup (nil = disabled)
+	isOwner          func(string) bool         // checks if user ID is a system owner (nil = no owners configured)
 }
 
 // NewAgentsHandler creates a handler for agent management endpoints.
@@ -200,6 +200,11 @@ func (h *AgentsHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		req.Workspace = fmt.Sprintf("%s/%s", h.defaultWorkspace, req.AgentKey)
 	}
 	req.RestrictToWorkspace = true
+	req.ExecutionMode = store.NormalizeAgentExecutionMode(req.ExecutionMode)
+	if err := store.ValidateAgentExecutionSettings(req.ExecutionMode, req.LocalRuntimeKind, req.BoundWorkerID); err != nil {
+		writeError(w, http.StatusBadRequest, protocol.ErrInvalidRequest, i18n.T(locale, i18n.MsgInvalidRequest, err.Error()))
+		return
+	}
 
 	// Default: enable compaction and memory for new agents
 	if len(req.CompactionConfig) == 0 {
@@ -322,6 +327,14 @@ func (h *AgentsHandler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	// Defense-in-depth against column injection via arbitrary JSON keys.
 	allowed := filterAllowedKeys(updates, agentAllowedFields)
 	allowed["restrict_to_workspace"] = true
+	if mode, runtimeKind, workerID, relevant, err := store.ResolveUpdatedAgentExecutionSettings(*ag, allowed); err != nil {
+		writeError(w, http.StatusBadRequest, protocol.ErrInvalidRequest, i18n.T(locale, i18n.MsgInvalidRequest, err.Error()))
+		return
+	} else if relevant {
+		allowed["execution_mode"] = mode
+		allowed["local_runtime_kind"] = runtimeKind
+		allowed["bound_worker_id"] = workerID
+	}
 
 	validationProvider := ag.Provider
 	if providerName, ok := allowed["provider"].(string); ok && providerName != "" {

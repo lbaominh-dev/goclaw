@@ -67,6 +67,10 @@ func (l *Loop) runLoop(ctx context.Context, req RunRequest) (result *RunResult, 
 	ctx = ctxSetup.ctx
 	resolvedTeamSettings := ctxSetup.resolvedTeamSettings
 
+	if l.executionMode == store.AgentExecutionModeLocalWorker {
+		return l.dispatchLocalWorkerRun(ctx, req)
+	}
+
 	// 0. Cache agent's context window on the session (first run only).
 	// Enables scheduler's adaptive throttle to use the real value instead of hardcoded 200K.
 	if l.sessions.GetContextWindow(ctx, req.SessionKey) <= 0 {

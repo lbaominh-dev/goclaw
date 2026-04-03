@@ -96,6 +96,18 @@ CRUD operations for agent management. Requires `X-GoClaw-User-Id` header for mul
 | `PUT` | `/v1/agents/{id}` | Update agent (owner only) | Bearer |
 | `DELETE` | `/v1/agents/{id}` | Delete agent (owner only) | Bearer |
 
+Agent create and update also support local-backed execution fields:
+
+```json
+{
+  "execution_mode": "local_worker",
+  "local_runtime_kind": "claude_cli",
+  "bound_worker_id": "worker-mbp-01"
+}
+```
+
+Use `execution_mode: "server"` for normal server-side execution.
+
 ### Shares
 
 | Method | Path | Description |

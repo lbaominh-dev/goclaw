@@ -16,6 +16,7 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/edition"
 	httpapi "github.com/nextlevelbuilder/goclaw/internal/http"
 	kg "github.com/nextlevelbuilder/goclaw/internal/knowledgegraph"
+	"github.com/nextlevelbuilder/goclaw/internal/localworker"
 	mcpbridge "github.com/nextlevelbuilder/goclaw/internal/mcp"
 	"github.com/nextlevelbuilder/goclaw/internal/media"
 	"github.com/nextlevelbuilder/goclaw/internal/providers"
@@ -49,6 +50,7 @@ func wireExtras(
 	injectionAction string,
 	appCfg *config.Config,
 	sandboxMgr sandbox.Manager,
+	workerManager *localworker.Manager,
 	redisClient any, // nil when built without -tags redis or when Redis is unconfigured
 ) (*tools.ContextFileInterceptor, *mcpbridge.Pool, *media.Store, tools.PostTurnProcessor) {
 	// 1. Build cache instances (in-memory or Redis depending on build tags)
@@ -128,6 +130,7 @@ func wireExtras(
 	if sas, ok := stores.Skills.(store.SkillAccessStore); ok {
 		skillAccessStore = sas
 	}
+	localWorkerDispatcher := localworker.NewDispatcher(stores.Workers, workerManager)
 
 	resolver := agent.NewManagedResolver(agent.ResolverDeps{
 		AgentStore:             stores.Agents,
@@ -169,6 +172,7 @@ func wireExtras(
 		BuiltinToolTenantCfgs:  stores.BuiltinToolTenantCfgs,
 		SkillTenantCfgs:        stores.SkillTenantCfgs,
 		Workspace:              workspace,
+		LocalWorkerDispatcher:  localWorkerDispatcher,
 		OnEvent: func(event agent.AgentEvent) {
 			// Sign /v1/files/ and /v1/media/ URLs in content before delivery.
 			// Sessions store clean paths; signing happens only at delivery time.
