@@ -205,7 +205,7 @@ func (h *AgentsHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, protocol.ErrInvalidRequest, i18n.T(locale, i18n.MsgInvalidRequest, err.Error()))
 		return
 	}
-	if err := store.ValidateAgentExecutionSettings(req.ExecutionMode, req.LocalRuntimeKind, req.BoundWorkerID, req.WorkerEndpointID); err != nil {
+	if err := store.ValidateAgentExecutionSettings(req.ExecutionMode, req.LocalRuntimeKind, req.BoundWorkerID, req.WorkerEndpointID, req.WorkspaceKey); err != nil {
 		writeError(w, http.StatusBadRequest, protocol.ErrInvalidRequest, i18n.T(locale, i18n.MsgInvalidRequest, err.Error()))
 		return
 	}
@@ -331,7 +331,7 @@ func (h *AgentsHandler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	// Defense-in-depth against column injection via arbitrary JSON keys.
 	allowed := filterAllowedKeys(updates, agentAllowedFields)
 	allowed["restrict_to_workspace"] = true
-	if mode, runtimeKind, workerID, workerEndpointID, relevant, err := store.ResolveUpdatedAgentExecutionSettings(*ag, allowed); err != nil {
+	if mode, runtimeKind, workerID, workerEndpointID, workspaceKey, relevant, err := store.ResolveUpdatedAgentExecutionSettings(*ag, allowed); err != nil {
 		writeError(w, http.StatusBadRequest, protocol.ErrInvalidRequest, i18n.T(locale, i18n.MsgInvalidRequest, err.Error()))
 		return
 	} else if relevant {
@@ -339,6 +339,7 @@ func (h *AgentsHandler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		allowed["local_runtime_kind"] = store.NullableStringUpdateArg(runtimeKind)
 		allowed["bound_worker_id"] = store.NullableStringUpdateArg(workerID)
 		allowed["worker_endpoint_id"] = store.NullableStringUpdateArg(workerEndpointID)
+		allowed["workspace_key"] = store.NullableStringUpdateArg(workspaceKey)
 	}
 
 	validationProvider := ag.Provider

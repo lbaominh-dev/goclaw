@@ -134,8 +134,13 @@ The difference is only the execution backend. A local-backed member requires:
 - `execution_mode = local_worker`
 - a fixed `local_runtime_kind` such as `claude_cli` or `opencode`
 - a bound `worker_endpoint_id`
+- `workspace_key` for `opencode` workers
 
 In this model, GoClaw connects outward to a worker server running on the local machine using a stored WebSocket endpoint profile and auth token. If the endpoint is unreachable or auth is rejected when the run starts, the delegated member run fails fast instead of falling back to server execution.
+
+For `opencode`, GoClaw sends the agent's `workspace_key` as `execution.workspaceKey` in the outbound worker payload. The worker server resolves that logical key to a machine-local absolute path using its own config, so GoClaw never needs to send raw filesystem paths across the wire.
+
+If a lead cancels a delegated task while the local worker job is running, GoClaw may send `job.cancel` to the worker endpoint so the worker can terminate the local process and report a terminal canceled failure back into the same team task lifecycle.
 
 ---
 

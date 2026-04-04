@@ -4,6 +4,7 @@ import "encoding/json"
 
 const (
 	OutboundEnvelopeJobDispatch = "job.dispatch"
+	OutboundEnvelopeJobCancel   = "job.cancel"
 	DefaultOutboundAuthHeader   = "Authorization"
 )
 
@@ -14,10 +15,20 @@ type OutboundEnvelope struct {
 }
 
 // OutboundJobDispatch is the payload shape for job.dispatch messages.
+type OutboundJobExecution struct {
+	WorkspaceKey string `json:"workspaceKey,omitempty"`
+}
+
 type OutboundJobDispatch struct {
-	JobID       string          `json:"jobId"`
-	RuntimeKind string          `json:"runtimeKind,omitempty"`
-	Job         json.RawMessage `json:"job,omitempty"`
+	JobID       string               `json:"jobId"`
+	RuntimeKind string               `json:"runtimeKind,omitempty"`
+	Job         json.RawMessage      `json:"job,omitempty"`
+	Execution   OutboundJobExecution `json:"execution,omitempty"`
+}
+
+type OutboundJobCancel struct {
+	JobID  string `json:"jobId"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // WorkerReplyEnvelope is a minimal shape for future worker replies.

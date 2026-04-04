@@ -141,6 +141,7 @@ export interface AgentData {
   local_runtime_kind?: string;
   bound_worker_id?: string;
   worker_endpoint_id?: string;
+  workspace_key?: string;
   created_at?: string;
   updated_at?: string;
 

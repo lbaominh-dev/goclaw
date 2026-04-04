@@ -22,6 +22,7 @@ type DispatchJobInput struct {
 	TenantID          uuid.UUID         `json:"tenantId"`
 	WorkerEndpointID  string            `json:"workerEndpointId"`
 	RuntimeKind       string            `json:"runtimeKind"`
+	WorkspaceKey      string            `json:"workspaceKey,omitempty"`
 	AgentID           uuid.UUID         `json:"agentId"`
 	AgentKey          string            `json:"agentKey"`
 	RunID             string            `json:"runId"`
@@ -73,6 +74,7 @@ func (d *Dispatcher) DispatchRun(ctx context.Context, input DispatchJobInput) (*
 	}
 	input.WorkerEndpointID = strings.TrimSpace(input.WorkerEndpointID)
 	input.RuntimeKind = strings.TrimSpace(input.RuntimeKind)
+	input.WorkspaceKey = strings.TrimSpace(input.WorkspaceKey)
 	if input.WorkerEndpointID == "" {
 		return nil, fmt.Errorf("worker endpoint id is required")
 	}
@@ -108,6 +110,9 @@ func (d *Dispatcher) DispatchRun(ctx context.Context, input DispatchJobInput) (*
 			JobID:       job.ID.String(),
 			RuntimeKind: input.RuntimeKind,
 			Job:         json.RawMessage(payload),
+			Execution: OutboundJobExecution{
+				WorkspaceKey: input.WorkspaceKey,
+			},
 		},
 	}); err != nil {
 		_ = d.workers.UpdateJobStatus(store.WithTenantID(ctx, input.TenantID), job.ID, store.WorkerJobStatusFailed, []byte(err.Error()))

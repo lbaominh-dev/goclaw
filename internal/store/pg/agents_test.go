@@ -34,6 +34,7 @@ func TestPGAgentStore_CreateAndGet_LocalWorkerFields(t *testing.T) {
 		ExecutionMode:       store.AgentExecutionModeLocalWorker,
 		LocalRuntimeKind:    "wails_desktop",
 		BoundWorkerID:       "worker-123",
+		WorkspaceKey:        "desktop-main",
 	}
 	setPGAgentWorkerEndpointID(t, agent, endpointID)
 
@@ -57,6 +58,9 @@ func TestPGAgentStore_CreateAndGet_LocalWorkerFields(t *testing.T) {
 	}
 	if gotWorkerEndpointID := getPGAgentWorkerEndpointID(t, got); gotWorkerEndpointID != endpointID {
 		t.Fatalf("WorkerEndpointID = %q, want %q", gotWorkerEndpointID, endpointID)
+	}
+	if got.WorkspaceKey != "desktop-main" {
+		t.Fatalf("WorkspaceKey = %q, want desktop-main", got.WorkspaceKey)
 	}
 }
 
@@ -100,6 +104,7 @@ func TestAgentExecutionSettingsRequireWorkerEndpointIDPG(t *testing.T) {
 		"execution_mode":     store.AgentExecutionModeLocalWorker,
 		"local_runtime_kind": "wails_desktop",
 		"worker_endpoint_id": endpointID,
+		"workspace_key":      "desktop-main",
 	}); err != nil {
 		t.Fatalf("valid local_worker update error: %v", err)
 	}
@@ -111,6 +116,9 @@ func TestAgentExecutionSettingsRequireWorkerEndpointIDPG(t *testing.T) {
 	if gotWorkerEndpointID := getPGAgentWorkerEndpointID(t, got); gotWorkerEndpointID != endpointID {
 		t.Fatalf("WorkerEndpointID after valid local_worker update = %q, want %q", gotWorkerEndpointID, endpointID)
 	}
+	if got.WorkspaceKey != "desktop-main" {
+		t.Fatalf("WorkspaceKey after valid local_worker update = %q, want desktop-main", got.WorkspaceKey)
+	}
 
 	if err := agentStore.Update(ctx, agent.ID, map[string]any{"execution_mode": store.AgentExecutionModeServer}); err == nil {
 		t.Fatal("expected server update with stale local worker fields to fail")
@@ -120,7 +128,7 @@ func TestAgentExecutionSettingsRequireWorkerEndpointIDPG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID after failed server update error: %v", err)
 	}
-	if got.ExecutionMode != store.AgentExecutionModeLocalWorker || got.LocalRuntimeKind != "wails_desktop" || getPGAgentWorkerEndpointID(t, got) != endpointID {
+	if got.ExecutionMode != store.AgentExecutionModeLocalWorker || got.LocalRuntimeKind != "wails_desktop" || getPGAgentWorkerEndpointID(t, got) != endpointID || got.WorkspaceKey != "desktop-main" {
 		t.Fatalf("agent state changed after failed server update: %+v", got)
 	}
 }
@@ -147,6 +155,7 @@ func TestPGAgentStore_UpdateTransitionsLocalWorkerToServer(t *testing.T) {
 		ExecutionMode:       store.AgentExecutionModeLocalWorker,
 		LocalRuntimeKind:    "wails_desktop",
 		BoundWorkerID:       "worker-123",
+		WorkspaceKey:        "desktop-main",
 	}
 	setPGAgentWorkerEndpointID(t, agent, endpointID)
 	if err := agentStore.Create(ctx, agent); err != nil {
@@ -158,6 +167,7 @@ func TestPGAgentStore_UpdateTransitionsLocalWorkerToServer(t *testing.T) {
 		"local_runtime_kind": nil,
 		"bound_worker_id":    nil,
 		"worker_endpoint_id": nil,
+		"workspace_key":      nil,
 	}); err != nil {
 		t.Fatalf("Update error: %v", err)
 	}
@@ -177,6 +187,9 @@ func TestPGAgentStore_UpdateTransitionsLocalWorkerToServer(t *testing.T) {
 	}
 	if gotWorkerEndpointID := getPGAgentWorkerEndpointID(t, got); gotWorkerEndpointID != "" {
 		t.Fatalf("WorkerEndpointID = %q, want empty", gotWorkerEndpointID)
+	}
+	if got.WorkspaceKey != "" {
+		t.Fatalf("WorkspaceKey = %q, want empty", got.WorkspaceKey)
 	}
 }
 
@@ -278,6 +291,7 @@ func applyTestPGAgentSchema(t *testing.T, db *sql.DB) {
 		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS local_runtime_kind VARCHAR(64)`,
 		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS bound_worker_id VARCHAR(255)`,
 		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS worker_endpoint_id UUID REFERENCES worker_endpoint_profiles(id) ON DELETE SET NULL`,
+		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS workspace_key TEXT`,
 	}
 
 	for _, stmt := range stmts {

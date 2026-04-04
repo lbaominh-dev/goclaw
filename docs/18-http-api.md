@@ -101,12 +101,20 @@ Agent create and update also support local-backed execution fields:
 ```json
 {
   "execution_mode": "local_worker",
-  "local_runtime_kind": "claude_cli",
-  "worker_endpoint_id": "019d53c5-7908-7eec-8d3a-f05c2e6cb18b"
+  "local_runtime_kind": "opencode",
+  "worker_endpoint_id": "019d53c5-7908-7eec-8d3a-f05c2e6cb18b",
+  "workspace_key": "goclaw-main"
 }
 ```
 
 Use `execution_mode: "server"` for normal server-side execution.
+
+Rules:
+
+- `worker_endpoint_id` selects the stored outbound worker endpoint profile
+- `workspace_key` is required for `local_runtime_kind: "opencode"`
+- `workspace_key` is a logical key resolved by the worker to a local absolute path
+- GoClaw does not send raw local filesystem paths in the agent request
 
 ### Worker Endpoint Profiles
 
@@ -129,6 +137,8 @@ Worker endpoint profile request example:
 ```
 
 The server stores the auth token but redacts it from response payloads.
+
+When paired with an `opencode` local-backed agent, GoClaw connects to this endpoint over WebSocket, sends `job.dispatch` with `execution.workspaceKey`, and may later send `job.cancel` if the delegated run is canceled.
 
 ### Shares
 

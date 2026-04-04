@@ -104,7 +104,7 @@ const agentSelectCols = `id, agent_key, display_name, frontmatter, owner_id, pro
 		 context_window, max_tool_iterations, workspace, restrict_to_workspace,
 		 tools_config, sandbox_config, subagents_config, memory_config,
 		 compaction_config, context_pruning, other_config,
-		 agent_type, is_default, status, execution_mode, local_runtime_kind, bound_worker_id, worker_endpoint_id,
+		 agent_type, is_default, status, execution_mode, local_runtime_kind, bound_worker_id, worker_endpoint_id, workspace_key,
 		 budget_monthly_cents, created_at, updated_at, tenant_id`
 
 func (s *PGAgentStore) Create(ctx context.Context, agent *store.AgentData) error {
@@ -112,7 +112,8 @@ func (s *PGAgentStore) Create(ctx context.Context, agent *store.AgentData) error
 	agent.LocalRuntimeKind = strings.TrimSpace(agent.LocalRuntimeKind)
 	agent.BoundWorkerID = strings.TrimSpace(agent.BoundWorkerID)
 	agent.WorkerEndpointID = strings.TrimSpace(agent.WorkerEndpointID)
-	if err := store.ValidateAgentExecutionSettings(agent.ExecutionMode, agent.LocalRuntimeKind, agent.BoundWorkerID, agent.WorkerEndpointID); err != nil {
+	agent.WorkspaceKey = strings.TrimSpace(agent.WorkspaceKey)
+	if err := store.ValidateAgentExecutionSettings(agent.ExecutionMode, agent.LocalRuntimeKind, agent.BoundWorkerID, agent.WorkerEndpointID, agent.WorkspaceKey); err != nil {
 		return err
 	}
 	if agent.ID == uuid.Nil {
@@ -130,9 +131,9 @@ func (s *PGAgentStore) Create(ctx context.Context, agent *store.AgentData) error
 		 context_window, max_tool_iterations, workspace, restrict_to_workspace,
 		 tools_config, sandbox_config, subagents_config, memory_config,
 		 compaction_config, context_pruning, other_config,
-		 agent_type, is_default, status, execution_mode, local_runtime_kind, bound_worker_id, worker_endpoint_id,
+		 agent_type, is_default, status, execution_mode, local_runtime_kind, bound_worker_id, worker_endpoint_id, workspace_key,
 		 budget_monthly_cents, created_at, updated_at, tenant_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)`,
 		agent.ID, agent.AgentKey, agent.DisplayName, sql.NullString{String: agent.Frontmatter, Valid: agent.Frontmatter != ""}, agent.OwnerID, agent.Provider, agent.Model,
 		agent.ContextWindow, agent.MaxToolIterations, agent.Workspace, agent.RestrictToWorkspace,
 		jsonOrEmpty(agent.ToolsConfig), jsonOrNull(agent.SandboxConfig), jsonOrNull(agent.SubagentsConfig), jsonOrNull(agent.MemoryConfig),
@@ -140,7 +141,7 @@ func (s *PGAgentStore) Create(ctx context.Context, agent *store.AgentData) error
 		agent.AgentType, agent.IsDefault, agent.Status, agent.ExecutionMode,
 		sql.NullString{String: agent.LocalRuntimeKind, Valid: agent.LocalRuntimeKind != ""},
 		sql.NullString{String: agent.BoundWorkerID, Valid: agent.BoundWorkerID != ""},
-		nullUUIDString(agent.WorkerEndpointID), agent.BudgetMonthlyCents, now, now, tenantID,
+		nullUUIDString(agent.WorkerEndpointID), sql.NullString{String: agent.WorkspaceKey, Valid: agent.WorkspaceKey != ""}, agent.BudgetMonthlyCents, now, now, tenantID,
 	)
 	if err != nil {
 		return err
@@ -202,13 +203,14 @@ func (s *PGAgentStore) Update(ctx context.Context, id uuid.UUID, updates map[str
 	if len(updates) == 0 {
 		return nil
 	}
-	if mode, localRuntimeKind, boundWorkerID, workerEndpointID, relevant, err := s.resolveExecutionSettingsUpdate(ctx, id, updates); err != nil {
+	if mode, localRuntimeKind, boundWorkerID, workerEndpointID, workspaceKey, relevant, err := s.resolveExecutionSettingsUpdate(ctx, id, updates); err != nil {
 		return err
 	} else if relevant {
 		updates["execution_mode"] = mode
 		updates["local_runtime_kind"] = store.NullableStringUpdateArg(localRuntimeKind)
 		updates["bound_worker_id"] = store.NullableStringUpdateArg(boundWorkerID)
 		updates["worker_endpoint_id"] = nullUUIDUpdateArg(workerEndpointID)
+		updates["workspace_key"] = store.NullableStringUpdateArg(workspaceKey)
 	}
 
 	// If setting this agent as default, unset any existing default first (scoped to same tenant).
@@ -259,16 +261,16 @@ func (s *PGAgentStore) Update(ctx context.Context, id uuid.UUID, updates map[str
 	return nil
 }
 
-func (s *PGAgentStore) resolveExecutionSettingsUpdate(ctx context.Context, id uuid.UUID, updates map[string]any) (string, *string, *string, *string, bool, error) {
+func (s *PGAgentStore) resolveExecutionSettingsUpdate(ctx context.Context, id uuid.UUID, updates map[string]any) (string, *string, *string, *string, *string, bool, error) {
 	if !store.HasExecutionSettingsUpdate(updates) {
-		return "", nil, nil, nil, false, nil
+		return "", nil, nil, nil, nil, false, nil
 	}
 	current, err := s.GetByID(ctx, id)
 	if err != nil {
 		if isSoftDeletedPGAgent(ctx, s.db, id) {
-			return "", nil, nil, nil, false, nil
+			return "", nil, nil, nil, nil, false, nil
 		}
-		return "", nil, nil, nil, false, err
+		return "", nil, nil, nil, nil, false, err
 	}
 	return store.ResolveUpdatedAgentExecutionSettings(*current, updates)
 }
@@ -529,14 +531,14 @@ type agentRowScanner interface {
 
 func scanAgentRow(row agentRowScanner) (*store.AgentData, error) {
 	var d store.AgentData
-	var frontmatter, executionMode, localRuntimeKind, boundWorkerID sql.NullString
+	var frontmatter, executionMode, localRuntimeKind, boundWorkerID, workspaceKey sql.NullString
 	var workerEndpointID uuid.NullUUID
 	// pgx: scan nullable JSONB into *[]byte (NOT *json.RawMessage — pgx can't scan NULL into defined types)
 	var toolsCfg, sandboxCfg, subagentsCfg, memoryCfg, compactionCfg, pruningCfg, otherCfg *[]byte
 	err := row.Scan(&d.ID, &d.AgentKey, &d.DisplayName, &frontmatter, &d.OwnerID, &d.Provider, &d.Model,
 		&d.ContextWindow, &d.MaxToolIterations, &d.Workspace, &d.RestrictToWorkspace,
 		&toolsCfg, &sandboxCfg, &subagentsCfg, &memoryCfg, &compactionCfg, &pruningCfg, &otherCfg,
-		&d.AgentType, &d.IsDefault, &d.Status, &executionMode, &localRuntimeKind, &boundWorkerID, &workerEndpointID,
+		&d.AgentType, &d.IsDefault, &d.Status, &executionMode, &localRuntimeKind, &boundWorkerID, &workerEndpointID, &workspaceKey,
 		&d.BudgetMonthlyCents, &d.CreatedAt, &d.UpdatedAt, &d.TenantID)
 	if err != nil {
 		return nil, err
@@ -553,6 +555,9 @@ func scanAgentRow(row agentRowScanner) (*store.AgentData, error) {
 	}
 	if workerEndpointID.Valid {
 		d.WorkerEndpointID = workerEndpointID.UUID.String()
+	}
+	if workspaceKey.Valid {
+		d.WorkspaceKey = workspaceKey.String
 	}
 	// Convert *[]byte → json.RawMessage (nil-safe)
 	if toolsCfg != nil {

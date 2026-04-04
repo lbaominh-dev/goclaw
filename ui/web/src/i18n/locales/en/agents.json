@@ -104,6 +104,9 @@
     "workerEndpoint": "Worker Endpoint",
     "workerEndpointPlaceholder": "Select a worker endpoint",
     "workerEndpointHint": "Choose the saved worker endpoint profile this agent should use.",
+    "workspaceKey": "Workspace Key",
+    "workspaceKeyPlaceholder": "e.g. goclaw-main",
+    "workspaceKeyHint": "Logical workspace key resolved by the worker to a local path for opencode jobs.",
     "cancel": "Cancel",
     "create": "Create",
     "creating": "Creating...",
@@ -438,7 +441,10 @@
     "runtimeKindHint": "Plain runtime identifier for the local worker backend.",
     "workerEndpointLabel": "Worker Endpoint",
     "workerEndpointPlaceholder": "Select a worker endpoint",
-    "workerEndpointHint": "Choose the saved worker endpoint profile this agent should use."
+    "workerEndpointHint": "Choose the saved worker endpoint profile this agent should use.",
+    "workspaceKeyLabel": "Workspace Key",
+    "workspaceKeyPlaceholder": "e.g. goclaw-main",
+    "workspaceKeyHint": "Logical workspace key the worker resolves to a local path for opencode runs."
   },
   "workerEndpoints": {
     "title": "Worker Endpoints",

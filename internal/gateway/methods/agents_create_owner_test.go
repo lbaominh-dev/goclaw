@@ -396,3 +396,33 @@ func TestHandleCreate_RejectsMalformedWorkerEndpointID(t *testing.T) {
 		t.Fatalf("error message = %q, want worker_endpoint_id validation failure", resp.Error.Message)
 	}
 }
+
+func TestHandleCreate_RejectsOpencodeLocalWorkerWithoutWorkspaceKey(t *testing.T) {
+	stub := &createCaptureStore{}
+	m := newManagedMethods(t, stub)
+	client := responseClient()
+
+	req := buildCreateRequest(t, map[string]any{
+		"name":               "Opencode Worker Agent",
+		"execution_mode":     store.AgentExecutionModeLocalWorker,
+		"local_runtime_kind": "opencode",
+		"worker_endpoint_id": uuid.NewString(),
+	})
+
+	m.handleCreate(context.Background(), client, req)
+
+	if stub.created != nil {
+		t.Fatal("agentStore.Create should not be called without workspace_key")
+	}
+
+	resp := readResponse(t, client)
+	if resp.OK {
+		t.Fatal("expected error response for missing workspace_key")
+	}
+	if resp.Error == nil {
+		t.Fatal("expected error details in response")
+	}
+	if !strings.Contains(resp.Error.Message, "workspace_key") {
+		t.Fatalf("error message = %q, want workspace_key validation failure", resp.Error.Message)
+	}
+}

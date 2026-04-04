@@ -36,6 +36,7 @@ export function AgentOverviewTab({ agent, onUpdate, heartbeat, onManageCodexPool
   const [executionMode, setExecutionMode] = useState(agent.execution_mode ?? "server");
   const [localRuntimeKind, setLocalRuntimeKind] = useState(agent.local_runtime_kind ?? "");
   const [workerEndpointId, setWorkerEndpointId] = useState(agent.worker_endpoint_id ?? "");
+  const [workspaceKey, setWorkspaceKey] = useState(agent.workspace_key ?? "");
 
   // Model & Budget
   const [provider, setProvider] = useState(agent.provider);
@@ -95,6 +96,7 @@ export function AgentOverviewTab({ agent, onUpdate, heartbeat, onManageCodexPool
         execution_mode: executionMode,
         local_runtime_kind: executionMode === "local_worker" ? localRuntimeKind.trim() : null,
         worker_endpoint_id: executionMode === "local_worker" ? workerEndpointId : null,
+        workspace_key: executionMode === "local_worker" && localRuntimeKind.trim() === "opencode" ? workspaceKey.trim() : null,
         memory_config: mem,
         subagents_config: subEnabled ? sub : null,
         tools_config: toolsEnabled
@@ -147,6 +149,8 @@ export function AgentOverviewTab({ agent, onUpdate, heartbeat, onManageCodexPool
         onLocalRuntimeKindChange={setLocalRuntimeKind}
         workerEndpointId={workerEndpointId}
         onWorkerEndpointIdChange={setWorkerEndpointId}
+        workspaceKey={workspaceKey}
+        onWorkspaceKeyChange={setWorkspaceKey}
       />
 
       <ChatGPTOAuthRoutingSummarySection agent={agent} onManage={onManageCodexPool} />
@@ -191,7 +195,7 @@ export function AgentOverviewTab({ agent, onUpdate, heartbeat, onManageCodexPool
       <StickySaveBar
         onSave={handleSave}
         saving={saving}
-        disabled={llmSaveBlocked || (executionMode === "local_worker" && (!localRuntimeKind.trim() || !workerEndpointId))}
+        disabled={llmSaveBlocked || (executionMode === "local_worker" && (!localRuntimeKind.trim() || !workerEndpointId || (localRuntimeKind.trim() === "opencode" && !workspaceKey.trim())))}
         label={t("general.saveChanges")}
         savingLabel={t("general.saving")}
       />

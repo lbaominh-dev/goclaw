@@ -198,12 +198,20 @@ Agent create/update also support local-backed execution settings:
 ```json
 {
   "execution_mode": "local_worker",
-  "local_runtime_kind": "claude_cli",
-  "bound_worker_id": "worker-mbp-01"
+  "local_runtime_kind": "opencode",
+  "worker_endpoint_id": "019d53c5-7908-7eec-8d3a-f05c2e6cb18b",
+  "workspace_key": "goclaw-main"
 }
 ```
 
 Use `execution_mode: "server"` to keep normal server-side execution.
+
+Rules:
+
+- `worker_endpoint_id` binds the agent to an outbound worker endpoint profile
+- `workspace_key` is required for `opencode` workers
+- `workspace_key` is persisted on the agent, not supplied ad hoc per task
+- GoClaw sends that value to the worker as `job.dispatch.payload.execution.workspaceKey`
 
 ### `agents.delete`
 
@@ -242,6 +250,14 @@ The worker-server wire contract is documented in:
 - `docs/superpowers/specs/2026-04-03-worker-endpoint-protocol.md`
 
 At the WebSocket RPC layer, local-worker execution no longer relies on dashboard clients calling `workers.register` as the primary model. The worker lifecycle is now driven by outbound endpoint profile configuration and agent binding via `worker_endpoint_id`.
+
+For `opencode` workers, the outbound flow is:
+
+1. Resolve the agent's `worker_endpoint_id`
+2. Resolve the agent's `workspace_key`
+3. Open or reuse the outbound WebSocket connection to the worker
+4. Send `job.dispatch` with `execution.workspaceKey`
+5. Optionally send `job.cancel` if the run is aborted before completion
 
 ---
 

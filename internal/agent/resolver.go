@@ -373,6 +373,7 @@ func NewManagedResolver(deps ResolverDeps) ResolverFunc {
 			LocalRuntimeKind:       ag.LocalRuntimeKind,
 			BoundWorkerID:          ag.BoundWorkerID,
 			WorkerEndpointID:       ag.WorkerEndpointID,
+			WorkspaceKey:           ag.WorkspaceKey,
 			ContextWindow:          contextWindow,
 			MaxTokens:              ag.ParseMaxTokens(),
 			MaxIterations:          maxIter,

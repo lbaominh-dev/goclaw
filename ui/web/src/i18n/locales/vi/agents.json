@@ -104,6 +104,9 @@
     "workerEndpoint": "Điểm cuối worker",
     "workerEndpointPlaceholder": "Chọn điểm cuối worker",
     "workerEndpointHint": "Chọn profile điểm cuối worker đã lưu mà agent này sẽ dùng.",
+    "workspaceKey": "Khóa workspace",
+    "workspaceKeyPlaceholder": "vd: goclaw-main",
+    "workspaceKeyHint": "Khóa workspace logic để worker ánh xạ sang đường dẫn cục bộ cho job opencode.",
     "cancel": "Hủy",
     "create": "Tạo",
     "creating": "Đang tạo...",
@@ -438,7 +441,10 @@
     "runtimeKindHint": "Mã runtime đơn giản cho backend local worker.",
     "workerEndpointLabel": "Điểm cuối worker",
     "workerEndpointPlaceholder": "Chọn điểm cuối worker",
-    "workerEndpointHint": "Chọn profile điểm cuối worker đã lưu mà agent này sẽ dùng."
+    "workerEndpointHint": "Chọn profile điểm cuối worker đã lưu mà agent này sẽ dùng.",
+    "workspaceKeyLabel": "Khóa workspace",
+    "workspaceKeyPlaceholder": "vd: goclaw-main",
+    "workspaceKeyHint": "Khóa workspace logic để worker ánh xạ sang đường dẫn cục bộ cho các lần chạy opencode."
   },
   "workerEndpoints": {
     "title": "Điểm cuối worker",

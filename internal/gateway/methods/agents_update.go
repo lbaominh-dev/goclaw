@@ -38,6 +38,7 @@ func (m *AgentsMethods) handleUpdate(ctx context.Context, client *gateway.Client
 		LocalRuntimeKind  json.RawMessage `json:"local_runtime_kind"`
 		BoundWorkerID     json.RawMessage `json:"bound_worker_id"`
 		WorkerEndpointID  json.RawMessage `json:"worker_endpoint_id"`
+		WorkspaceKey      json.RawMessage `json:"workspace_key"`
 		// Per-agent config overrides
 		ToolsConfig      json.RawMessage `json:"tools_config,omitempty"`
 		SubagentsConfig  json.RawMessage `json:"subagents_config,omitempty"`
@@ -141,6 +142,18 @@ func (m *AgentsMethods) handleUpdate(ctx context.Context, client *gateway.Client
 			}
 			updates["worker_endpoint_id"] = store.NullableStringUpdateArg(value)
 		}
+		if len(params.WorkspaceKey) > 0 {
+			var value *string
+			if string(params.WorkspaceKey) != "null" {
+				var s string
+				if err := json.Unmarshal(params.WorkspaceKey, &s); err != nil {
+					client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, "workspace_key must be a string"))
+					return
+				}
+				value = &s
+			}
+			updates["workspace_key"] = store.NullableStringUpdateArg(value)
+		}
 		// Per-agent JSONB config overrides
 		if len(params.ToolsConfig) > 0 {
 			updates["tools_config"] = []byte(params.ToolsConfig)
@@ -163,7 +176,7 @@ func (m *AgentsMethods) handleUpdate(ctx context.Context, client *gateway.Client
 		if len(params.OtherConfig) > 0 {
 			updates["other_config"] = []byte(params.OtherConfig)
 		}
-		mode, localRuntimeKind, boundWorkerID, workerEndpointID, relevant, err := store.ResolveUpdatedAgentExecutionSettings(*ag, updates)
+		mode, localRuntimeKind, boundWorkerID, workerEndpointID, workspaceKey, relevant, err := store.ResolveUpdatedAgentExecutionSettings(*ag, updates)
 		if err != nil {
 			client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, err.Error()))
 			return
@@ -173,6 +186,7 @@ func (m *AgentsMethods) handleUpdate(ctx context.Context, client *gateway.Client
 			updates["local_runtime_kind"] = store.NullableStringUpdateArg(localRuntimeKind)
 			updates["bound_worker_id"] = store.NullableStringUpdateArg(boundWorkerID)
 			updates["worker_endpoint_id"] = store.NullableStringUpdateArg(workerEndpointID)
+			updates["workspace_key"] = store.NullableStringUpdateArg(workspaceKey)
 		}
 
 		if len(updates) > 0 {

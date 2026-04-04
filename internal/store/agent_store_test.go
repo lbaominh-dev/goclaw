@@ -3,8 +3,19 @@ package store
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+func TestValidateAgentExecutionSettingsRequiresWorkspaceKeyForOpencode(t *testing.T) {
+	err := ValidateAgentExecutionSettings(AgentExecutionModeLocalWorker, "opencode", "", "11111111-1111-1111-1111-111111111111", "")
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "workspace_key") {
+		t.Fatalf("error = %v, want workspace_key validation", err)
+	}
+}
 
 func TestParseReasoningConfigDefaultsToOff(t *testing.T) {
 	agent := &AgentData{}

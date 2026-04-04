@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS agents (
     local_runtime_kind    TEXT,
     bound_worker_id       TEXT,
     worker_endpoint_id    TEXT REFERENCES worker_endpoint_profiles(id) ON DELETE SET NULL,
+    workspace_key         TEXT,
     frontmatter           TEXT,
     budget_monthly_cents  INTEGER,
     tenant_id             TEXT NOT NULL REFERENCES tenants(id),
@@ -139,6 +140,7 @@ CREATE INDEX IF NOT EXISTS idx_agents_tenant ON agents(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_agents_tenant_active ON agents(tenant_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_agents_tenant_bound_worker ON agents(tenant_id, bound_worker_id) WHERE bound_worker_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_agents_tenant_worker_endpoint ON agents(tenant_id, worker_endpoint_id) WHERE worker_endpoint_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agents_tenant_workspace_key ON agents(tenant_id, workspace_key) WHERE workspace_key IS NOT NULL;
 
 -- ============================================================
 -- Table: agent_shares

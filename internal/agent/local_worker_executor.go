@@ -23,6 +23,7 @@ func (l *Loop) dispatchLocalWorkerRun(ctx context.Context, req RunRequest) (*Run
 		TenantID:          store.TenantIDFromContext(ctx),
 		WorkerEndpointID:  l.workerEndpointID,
 		RuntimeKind:       l.localRuntimeKind,
+		WorkspaceKey:      l.workspaceKey,
 		AgentID:           l.agentUUID,
 		AgentKey:          l.id,
 		RunID:             req.RunID,

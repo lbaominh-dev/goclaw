@@ -40,9 +40,10 @@ func TestRunRequest_LocalWorkerMember_DispatchesJobInsteadOfProvider(t *testing.
 
 	loop := newLocalWorkerTestLoop(t, provider, tenantID, agentID)
 	setLoopStringField(t, loop, "executionMode", store.AgentExecutionModeLocalWorker)
-	setLoopStringField(t, loop, "localRuntimeKind", "wails_desktop")
+	setLoopStringField(t, loop, "localRuntimeKind", "opencode")
 	setLoopStringField(t, loop, "boundWorkerID", "worker-123")
 	setLoopStringField(t, loop, "workerEndpointID", endpointID.String())
+	setLoopStringField(t, loop, "workspaceKey", "desktop-main")
 	setLoopDispatcherField(t, loop, outbound, workerStore)
 
 	req := RunRequest{
@@ -130,8 +131,11 @@ func TestRunRequest_LocalWorkerMember_DispatchesJobInsteadOfProvider(t *testing.
 	if dispatchPayload.JobID != job.ID.String() {
 		t.Fatalf("payload jobId = %q, want %q", dispatchPayload.JobID, job.ID.String())
 	}
-	if dispatchPayload.RuntimeKind != "wails_desktop" {
-		t.Fatalf("payload runtimeKind = %q, want %q", dispatchPayload.RuntimeKind, "wails_desktop")
+	if dispatchPayload.RuntimeKind != "opencode" {
+		t.Fatalf("payload runtimeKind = %q, want %q", dispatchPayload.RuntimeKind, "opencode")
+	}
+	if dispatchPayload.Execution.WorkspaceKey != "desktop-main" {
+		t.Fatalf("payload execution.workspaceKey = %q, want %q", dispatchPayload.Execution.WorkspaceKey, "desktop-main")
 	}
 
 	var persistedPayload localWorkerDispatchPayload
@@ -179,6 +183,9 @@ func TestRunRequest_LocalWorkerMember_DispatchesJobInsteadOfProvider(t *testing.
 	}
 	if persistedPayload.ExtraSystemPrompt != req.ExtraSystemPrompt {
 		t.Fatalf("payload extra_system_prompt = %q, want %q", persistedPayload.ExtraSystemPrompt, req.ExtraSystemPrompt)
+	}
+	if persistedPayload.WorkspaceKey != "desktop-main" {
+		t.Fatalf("payload workspace_key = %q, want %q", persistedPayload.WorkspaceKey, "desktop-main")
 	}
 	if persistedPayload.RunContext == nil {
 		t.Fatal("payload run_context is nil")
@@ -634,6 +641,7 @@ type localWorkerDispatchPayload struct {
 	SessionKey        string            `json:"sessionKey"`
 	AgentID           string            `json:"agentId"`
 	AgentKey          string            `json:"agentKey"`
+	WorkspaceKey      string            `json:"workspaceKey,omitempty"`
 	UserID            string            `json:"userId,omitempty"`
 	Message           string            `json:"message"`
 	Channel           string            `json:"channel,omitempty"`

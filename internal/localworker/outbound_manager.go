@@ -64,6 +64,16 @@ func (m *OutboundManager) Dispatch(ctx context.Context, endpointID uuid.UUID, en
 	return nil
 }
 
+func (m *OutboundManager) Cancel(ctx context.Context, endpointID uuid.UUID, jobID, reason string) error {
+	return m.Dispatch(ctx, endpointID, OutboundEnvelope{
+		Type: OutboundEnvelopeJobCancel,
+		Payload: OutboundJobCancel{
+			JobID:  jobID,
+			Reason: reason,
+		},
+	})
+}
+
 func (m *OutboundManager) clientForDispatch(ctx context.Context, endpointID uuid.UUID) (*outboundClient, error) {
 	cacheKey := cacheKeyFromContext(ctx, endpointID)
 	m.mu.Lock()

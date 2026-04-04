@@ -66,6 +66,7 @@ type AgentData struct {
 	LocalRuntimeKind    string    `json:"local_runtime_kind,omitempty"`
 	BoundWorkerID       string    `json:"bound_worker_id,omitempty"`
 	WorkerEndpointID    string    `json:"worker_endpoint_id,omitempty"`
+	WorkspaceKey        string    `json:"workspace_key,omitempty"`
 
 	// Budget: optional monthly spending limit in cents (nil = unlimited)
 	BudgetMonthlyCents *int `json:"budget_monthly_cents,omitempty"`
@@ -91,24 +92,28 @@ func NormalizeAgentExecutionMode(mode string) string {
 	}
 }
 
-func ValidateAgentExecutionSettings(mode, localRuntimeKind, boundWorkerID, workerEndpointID string) error {
+func ValidateAgentExecutionSettings(mode, localRuntimeKind, boundWorkerID, workerEndpointID, workspaceKey string) error {
 	mode = NormalizeAgentExecutionMode(mode)
 	localRuntimeKind = strings.TrimSpace(localRuntimeKind)
 	boundWorkerID = strings.TrimSpace(boundWorkerID)
 	workerEndpointID = strings.TrimSpace(workerEndpointID)
+	workspaceKey = strings.TrimSpace(workspaceKey)
 	if err := ValidateWorkerEndpointID(workerEndpointID); err != nil {
 		return err
 	}
 
 	switch mode {
 	case AgentExecutionModeServer:
-		if localRuntimeKind != "" || boundWorkerID != "" || workerEndpointID != "" {
+		if localRuntimeKind != "" || boundWorkerID != "" || workerEndpointID != "" || workspaceKey != "" {
 			return fmt.Errorf("server execution mode does not allow local worker fields")
 		}
 		return nil
 	case AgentExecutionModeLocalWorker:
 		if localRuntimeKind == "" || workerEndpointID == "" {
 			return fmt.Errorf("local_worker execution mode requires local_runtime_kind and worker_endpoint_id")
+		}
+		if localRuntimeKind == "opencode" && workspaceKey == "" {
+			return fmt.Errorf("local_worker execution mode requires workspace_key for opencode runtime")
 		}
 		return nil
 	default:
@@ -127,17 +132,18 @@ func ValidateWorkerEndpointID(value string) error {
 	return nil
 }
 
-func ResolveUpdatedAgentExecutionSettings(current AgentData, updates map[string]any) (string, *string, *string, *string, bool, error) {
+func ResolveUpdatedAgentExecutionSettings(current AgentData, updates map[string]any) (string, *string, *string, *string, *string, bool, error) {
 	mode := current.ExecutionMode
 	localRuntimeKind := new(current.LocalRuntimeKind)
 	boundWorkerID := new(current.BoundWorkerID)
 	workerEndpointID := new(current.WorkerEndpointID)
+	workspaceKey := new(current.WorkspaceKey)
 	relevant := false
 
 	if raw, ok := updates["execution_mode"]; ok {
 		s, ok := raw.(string)
 		if !ok {
-			return "", nil, nil, nil, false, fmt.Errorf("execution_mode must be a string")
+			return "", nil, nil, nil, nil, false, fmt.Errorf("execution_mode must be a string")
 		}
 		mode = s
 		relevant = true
@@ -145,7 +151,7 @@ func ResolveUpdatedAgentExecutionSettings(current AgentData, updates map[string]
 	if raw, ok := updates["local_runtime_kind"]; ok {
 		v, err := nullableStringUpdateValue(raw, "local_runtime_kind")
 		if err != nil {
-			return "", nil, nil, nil, false, err
+			return "", nil, nil, nil, nil, false, err
 		}
 		localRuntimeKind = v
 		relevant = true
@@ -153,7 +159,7 @@ func ResolveUpdatedAgentExecutionSettings(current AgentData, updates map[string]
 	if raw, ok := updates["bound_worker_id"]; ok {
 		v, err := nullableStringUpdateValue(raw, "bound_worker_id")
 		if err != nil {
-			return "", nil, nil, nil, false, err
+			return "", nil, nil, nil, nil, false, err
 		}
 		boundWorkerID = v
 		relevant = true
@@ -161,26 +167,35 @@ func ResolveUpdatedAgentExecutionSettings(current AgentData, updates map[string]
 	if raw, ok := updates["worker_endpoint_id"]; ok {
 		v, err := nullableStringUpdateValue(raw, "worker_endpoint_id")
 		if err != nil {
-			return "", nil, nil, nil, false, err
+			return "", nil, nil, nil, nil, false, err
 		}
 		workerEndpointID = v
 		relevant = true
 	}
+	if raw, ok := updates["workspace_key"]; ok {
+		v, err := nullableStringUpdateValue(raw, "workspace_key")
+		if err != nil {
+			return "", nil, nil, nil, nil, false, err
+		}
+		workspaceKey = v
+		relevant = true
+	}
 	if !relevant {
-		return "", nil, nil, nil, false, nil
+		return "", nil, nil, nil, nil, false, nil
 	}
 
 	mode = NormalizeAgentExecutionMode(mode)
 	localRuntimeKindValue := strings.TrimSpace(derefString(localRuntimeKind))
 	boundWorkerIDValue := strings.TrimSpace(derefString(boundWorkerID))
 	workerEndpointIDValue := strings.TrimSpace(derefString(workerEndpointID))
+	workspaceKeyValue := strings.TrimSpace(derefString(workspaceKey))
 	if err := ValidateWorkerEndpointID(workerEndpointIDValue); err != nil {
-		return "", nil, nil, nil, true, err
+		return "", nil, nil, nil, nil, true, err
 	}
-	if err := ValidateAgentExecutionSettings(mode, localRuntimeKindValue, boundWorkerIDValue, workerEndpointIDValue); err != nil {
-		return "", nil, nil, nil, true, err
+	if err := ValidateAgentExecutionSettings(mode, localRuntimeKindValue, boundWorkerIDValue, workerEndpointIDValue, workspaceKeyValue); err != nil {
+		return "", nil, nil, nil, nil, true, err
 	}
-	return mode, nilIfEmpty(localRuntimeKindValue), nilIfEmpty(boundWorkerIDValue), nilIfEmpty(workerEndpointIDValue), true, nil
+	return mode, nilIfEmpty(localRuntimeKindValue), nilIfEmpty(boundWorkerIDValue), nilIfEmpty(workerEndpointIDValue), nilIfEmpty(workspaceKeyValue), true, nil
 }
 
 func HasExecutionSettingsUpdate(updates map[string]any) bool {
@@ -191,7 +206,8 @@ func HasExecutionSettingsUpdate(updates map[string]any) bool {
 	_, hasRuntime := updates["local_runtime_kind"]
 	_, hasWorker := updates["bound_worker_id"]
 	_, hasEndpoint := updates["worker_endpoint_id"]
-	return hasMode || hasRuntime || hasWorker || hasEndpoint
+	_, hasWorkspace := updates["workspace_key"]
+	return hasMode || hasRuntime || hasWorker || hasEndpoint || hasWorkspace
 }
 
 func nullableStringUpdateValue(raw any, field string) (*string, error) {

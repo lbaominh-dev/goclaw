@@ -104,6 +104,9 @@
     "workerEndpoint": "Worker 端点",
     "workerEndpointPlaceholder": "选择 worker 端点",
     "workerEndpointHint": "选择这个 agent 应使用的已保存 worker 端点配置。",
+    "workspaceKey": "工作区键",
+    "workspaceKeyPlaceholder": "例如：goclaw-main",
+    "workspaceKeyHint": "供 worker 解析为本地路径的逻辑工作区键，用于 opencode 任务。",
     "cancel": "取消",
     "create": "创建",
     "creating": "创建中...",
@@ -438,7 +441,10 @@
     "runtimeKindHint": "本地 worker 后端使用的纯文本运行时标识。",
     "workerEndpointLabel": "Worker 端点",
     "workerEndpointPlaceholder": "选择 worker 端点",
-    "workerEndpointHint": "选择这个 agent 应使用的已保存 worker 端点配置。"
+    "workerEndpointHint": "选择这个 agent 应使用的已保存 worker 端点配置。",
+    "workspaceKeyLabel": "工作区键",
+    "workspaceKeyPlaceholder": "例如：goclaw-main",
+    "workspaceKeyHint": "worker 会把这个逻辑工作区键解析为 opencode 运行时使用的本地路径。"
   },
   "workerEndpoints": {
     "title": "Worker 端点",

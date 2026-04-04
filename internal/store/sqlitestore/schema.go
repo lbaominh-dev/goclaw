@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+
+	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
 //go:embed schema.sql
@@ -15,7 +17,7 @@ var schemaSQL string
 
 // SchemaVersion is the current SQLite schema version.
 // Bump this when adding new migration steps below.
-const SchemaVersion = 8
+const SchemaVersion = 9
 
 // migrations maps version → SQL to apply when upgrading FROM that version.
 // schema.sql always represents the LATEST full schema (for fresh DBs).
@@ -93,68 +95,8 @@ CREATE INDEX IF NOT EXISTS idx_subagent_tasks_created ON subagent_tasks(tenant_i
 CREATE UNIQUE INDEX IF NOT EXISTS idx_worker_endpoint_profiles_tenant_name ON worker_endpoint_profiles(tenant_id, name);
 ALTER TABLE agents ADD COLUMN worker_endpoint_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_agents_tenant_worker_endpoint ON agents(tenant_id, worker_endpoint_id) WHERE worker_endpoint_id IS NOT NULL;`,
-	7: `DROP INDEX IF EXISTS idx_agents_tenant_agent_key_active;
-DROP INDEX IF EXISTS idx_agents_owner;
-DROP INDEX IF EXISTS idx_agents_status;
-DROP INDEX IF EXISTS idx_agents_tenant;
-DROP INDEX IF EXISTS idx_agents_tenant_active;
-DROP INDEX IF EXISTS idx_agents_tenant_bound_worker;
-DROP INDEX IF EXISTS idx_agents_tenant_worker_endpoint;
-ALTER TABLE agents RENAME TO agents__old;
-CREATE TABLE agents (
-    id                    TEXT NOT NULL PRIMARY KEY,
-    agent_key             VARCHAR(100) NOT NULL,
-    display_name          VARCHAR(255),
-    owner_id              VARCHAR(255) NOT NULL,
-    provider              VARCHAR(50) NOT NULL DEFAULT 'openrouter',
-    model                 VARCHAR(200) NOT NULL,
-    context_window        INT NOT NULL DEFAULT 200000,
-    max_tool_iterations   INT NOT NULL DEFAULT 20,
-    workspace             TEXT NOT NULL DEFAULT '.',
-    restrict_to_workspace BOOLEAN NOT NULL DEFAULT 1,
-    tools_config          TEXT NOT NULL DEFAULT '{}',
-    sandbox_config        TEXT,
-    subagents_config      TEXT,
-    memory_config         TEXT,
-    compaction_config     TEXT,
-    context_pruning       TEXT,
-    other_config          TEXT NOT NULL DEFAULT '{}',
-    is_default            BOOLEAN NOT NULL DEFAULT 0,
-    agent_type            VARCHAR(20) NOT NULL DEFAULT 'open',
-    status                VARCHAR(20) DEFAULT 'active',
-    execution_mode        VARCHAR(32) NOT NULL DEFAULT 'server',
-    local_runtime_kind    TEXT,
-    bound_worker_id       TEXT,
-    worker_endpoint_id    TEXT REFERENCES worker_endpoint_profiles(id) ON DELETE SET NULL,
-    frontmatter           TEXT,
-    budget_monthly_cents  INTEGER,
-    tenant_id             TEXT NOT NULL REFERENCES tenants(id),
-    created_at            TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    updated_at            TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    deleted_at            TEXT
-);
-INSERT INTO agents (
-    id, agent_key, display_name, owner_id, provider, model, context_window, max_tool_iterations,
-    workspace, restrict_to_workspace, tools_config, sandbox_config, subagents_config, memory_config,
-    compaction_config, context_pruning, other_config, is_default, agent_type, status, execution_mode,
-    local_runtime_kind, bound_worker_id, worker_endpoint_id, frontmatter, budget_monthly_cents,
-    tenant_id, created_at, updated_at, deleted_at
-)
-SELECT
-    id, agent_key, display_name, owner_id, provider, model, context_window, max_tool_iterations,
-    workspace, restrict_to_workspace, tools_config, sandbox_config, subagents_config, memory_config,
-    compaction_config, context_pruning, other_config, is_default, agent_type, status, execution_mode,
-    local_runtime_kind, bound_worker_id, worker_endpoint_id, frontmatter, budget_monthly_cents,
-    tenant_id, created_at, updated_at, deleted_at
-FROM agents__old;
-DROP TABLE agents__old;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_tenant_agent_key_active ON agents(tenant_id, agent_key) WHERE deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_agents_owner ON agents(owner_id) WHERE deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status) WHERE deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_agents_tenant ON agents(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_agents_tenant_active ON agents(tenant_id) WHERE deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_agents_tenant_bound_worker ON agents(tenant_id, bound_worker_id) WHERE bound_worker_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_agents_tenant_worker_endpoint ON agents(tenant_id, worker_endpoint_id) WHERE worker_endpoint_id IS NOT NULL;`,
+	8: `ALTER TABLE agents ADD COLUMN workspace_key TEXT;
+CREATE INDEX IF NOT EXISTS idx_agents_tenant_workspace_key ON agents(tenant_id, workspace_key) WHERE workspace_key IS NOT NULL;`,
 }
 
 // EnsureSchema creates tables if they don't exist and applies incremental migrations.
@@ -206,12 +148,18 @@ func EnsureSchema(db *sql.DB) error {
 				return fmt.Errorf("begin migration tx v%d: %w", v, txErr)
 			}
 
-			if v == 5 {
+			switch v {
+			case 5:
 				if err := applyWorkerSchemaMigrationV5ToV6(tx); err != nil {
 					tx.Rollback()
 					return fmt.Errorf("apply migration v%d: %w", v, err)
 				}
-			} else {
+			case 7:
+				if err := applyAgentTableRebuildMigrationV7ToV8(tx); err != nil {
+					tx.Rollback()
+					return fmt.Errorf("apply migration v%d: %w", v, err)
+				}
+			default:
 				patch, ok := migrations[v]
 				if !ok {
 					tx.Rollback()
@@ -316,6 +264,174 @@ FROM local_worker_jobs__old`); err != nil {
 	return nil
 }
 
+func applyAgentTableRebuildMigrationV7ToV8(tx *sql.Tx) error {
+	stmts := []string{
+		`DROP INDEX IF EXISTS idx_agents_tenant_agent_key_active`,
+		`DROP INDEX IF EXISTS idx_agents_owner`,
+		`DROP INDEX IF EXISTS idx_agents_status`,
+		`DROP INDEX IF EXISTS idx_agents_tenant`,
+		`DROP INDEX IF EXISTS idx_agents_tenant_active`,
+		`DROP INDEX IF EXISTS idx_agents_tenant_bound_worker`,
+		`DROP INDEX IF EXISTS idx_agents_tenant_worker_endpoint`,
+		`ALTER TABLE agents RENAME TO agents__old`,
+		`CREATE TABLE agents (
+    id                    TEXT NOT NULL PRIMARY KEY,
+    agent_key             VARCHAR(100) NOT NULL,
+    display_name          VARCHAR(255),
+    owner_id              VARCHAR(255) NOT NULL,
+    provider              VARCHAR(50) NOT NULL DEFAULT 'openrouter',
+    model                 VARCHAR(200) NOT NULL,
+    context_window        INT NOT NULL DEFAULT 200000,
+    max_tool_iterations   INT NOT NULL DEFAULT 20,
+    workspace             TEXT NOT NULL DEFAULT '.',
+    restrict_to_workspace BOOLEAN NOT NULL DEFAULT 1,
+    tools_config          TEXT NOT NULL DEFAULT '{}',
+    sandbox_config        TEXT,
+    subagents_config      TEXT,
+    memory_config         TEXT,
+    compaction_config     TEXT,
+    context_pruning       TEXT,
+    other_config          TEXT NOT NULL DEFAULT '{}',
+    is_default            BOOLEAN NOT NULL DEFAULT 0,
+    agent_type            VARCHAR(20) NOT NULL DEFAULT 'open',
+    status                VARCHAR(20) DEFAULT 'active',
+    execution_mode        VARCHAR(32) NOT NULL DEFAULT 'server',
+    local_runtime_kind    TEXT,
+    bound_worker_id       TEXT,
+    worker_endpoint_id    TEXT REFERENCES worker_endpoint_profiles(id) ON DELETE SET NULL,
+    frontmatter           TEXT,
+    budget_monthly_cents  INTEGER,
+    tenant_id             TEXT NOT NULL REFERENCES tenants(id),
+    created_at            TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at            TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    deleted_at            TEXT
+)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+
+	columns, err := sqliteTableColumns(tx, "agents__old")
+	if err != nil {
+		return err
+	}
+
+	insertColumns := []string{
+		"id", "agent_key", "display_name", "owner_id", "provider", "model", "context_window", "max_tool_iterations",
+		"workspace", "restrict_to_workspace", "tools_config", "sandbox_config", "subagents_config", "memory_config",
+		"compaction_config", "context_pruning", "other_config", "is_default", "agent_type", "status", "execution_mode",
+		"local_runtime_kind", "bound_worker_id", "worker_endpoint_id", "frontmatter", "budget_monthly_cents",
+		"tenant_id", "created_at", "updated_at", "deleted_at",
+	}
+	selectExpressions := []string{
+		sqliteColumnOrDefault(columns, "id", "''"),
+		sqliteColumnOrDefault(columns, "agent_key", "''"),
+		sqliteColumnOrDefault(columns, "display_name", "NULL"),
+		sqliteColumnOrDefault(columns, "owner_id", "''"),
+		sqliteColumnOrDefault(columns, "provider", "'openrouter'"),
+		sqliteColumnOrDefault(columns, "model", "''"),
+		sqliteColumnOrDefault(columns, "context_window", "200000"),
+		sqliteColumnOrDefault(columns, "max_tool_iterations", "20"),
+		sqliteColumnOrDefault(columns, "workspace", "'.'"),
+		sqliteColumnOrDefault(columns, "restrict_to_workspace", "1"),
+		sqliteColumnOrDefault(columns, "tools_config", "'{}'"),
+		sqliteColumnOrDefault(columns, "sandbox_config", "NULL"),
+		sqliteColumnOrDefault(columns, "subagents_config", "NULL"),
+		sqliteColumnOrDefault(columns, "memory_config", "NULL"),
+		sqliteColumnOrDefault(columns, "compaction_config", "NULL"),
+		sqliteColumnOrDefault(columns, "context_pruning", "NULL"),
+		sqliteColumnOrDefault(columns, "other_config", "'{}'"),
+		sqliteColumnOrDefault(columns, "is_default", "0"),
+		sqliteColumnOrDefault(columns, "agent_type", "'open'"),
+		sqliteColumnOrDefault(columns, "status", "'active'"),
+		sqliteColumnOrDefault(columns, "execution_mode", "'server'"),
+		sqliteColumnOrDefault(columns, "local_runtime_kind", "NULL"),
+		sqliteColumnOrDefault(columns, "bound_worker_id", "NULL"),
+		sqliteColumnOrDefault(columns, "worker_endpoint_id", "NULL"),
+		sqliteColumnOrDefault(columns, "frontmatter", "NULL"),
+		sqliteColumnOrDefault(columns, "budget_monthly_cents", "NULL"),
+		sqliteColumnOrDefault(columns, "tenant_id", fmt.Sprintf("'%s'", store.MasterTenantID)),
+		sqliteColumnOrDefault(columns, "created_at", "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"),
+		sqliteColumnOrDefault(columns, "updated_at", "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"),
+		sqliteColumnOrDefault(columns, "deleted_at", "NULL"),
+	}
+
+	insertSQL := fmt.Sprintf(
+		"INSERT INTO agents (%s) SELECT %s FROM agents__old",
+		strings.Join(insertColumns, ", "),
+		strings.Join(selectExpressions, ", "),
+	)
+	if _, err := tx.Exec(insertSQL); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE agents__old`); err != nil {
+		return err
+	}
+
+	hasWorkerJobs, err := sqliteTableExists(tx, "local_worker_jobs")
+	if err != nil {
+		return err
+	}
+	if hasWorkerJobs {
+		if _, err := tx.Exec(`ALTER TABLE local_worker_jobs RENAME TO local_worker_jobs__old_fkfix`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`CREATE TABLE local_worker_jobs (
+    id           TEXT PRIMARY KEY,
+    tenant_id    TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    worker_id    TEXT NOT NULL,
+    agent_id     TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    task_id      TEXT,
+    job_type     TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'queued',
+    payload      TEXT NOT NULL DEFAULT '{}',
+    result       TEXT,
+    started_at   TEXT,
+    completed_at TEXT,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+)`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO local_worker_jobs (
+    id, tenant_id, worker_id, agent_id, task_id, job_type, status, payload, result, started_at, completed_at, created_at, updated_at
+)
+SELECT
+    id, tenant_id, worker_id, agent_id, task_id, job_type, status, payload, result, started_at, completed_at, created_at, updated_at
+FROM local_worker_jobs__old_fkfix`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DROP TABLE local_worker_jobs__old_fkfix`); err != nil {
+			return err
+		}
+	}
+
+	indexStmts := []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_tenant_agent_key_active ON agents(tenant_id, agent_key) WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_agents_owner ON agents(owner_id) WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status) WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_agents_tenant ON agents(tenant_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_agents_tenant_active ON agents(tenant_id) WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_agents_tenant_bound_worker ON agents(tenant_id, bound_worker_id) WHERE bound_worker_id IS NOT NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_agents_tenant_worker_endpoint ON agents(tenant_id, worker_endpoint_id) WHERE worker_endpoint_id IS NOT NULL`,
+	}
+	if hasWorkerJobs {
+		indexStmts = append(indexStmts,
+			`CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_tenant_worker_status ON local_worker_jobs(tenant_id, worker_id, status)`,
+			`CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_tenant_task ON local_worker_jobs(tenant_id, task_id) WHERE task_id IS NOT NULL`,
+		)
+	}
+	for _, stmt := range indexStmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func sqliteTableExists(tx *sql.Tx, name string) (bool, error) {
 	var found string
 	err := tx.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, name).Scan(&found)
@@ -326,6 +442,34 @@ func sqliteTableExists(tx *sql.Tx, name string) (bool, error) {
 		return false, err
 	}
 	return strings.EqualFold(found, name), nil
+}
+
+func sqliteTableColumns(tx *sql.Tx, table string) (map[string]bool, error) {
+	rows, err := tx.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return columns, nil
+}
+
+func sqliteColumnOrDefault(columns map[string]bool, name, fallback string) string {
+	if columns[name] {
+		return name
+	}
+	return fallback
 }
 
 // seedMasterTenant ensures the master tenant row exists (idempotent).

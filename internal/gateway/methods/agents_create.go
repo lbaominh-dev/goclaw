@@ -40,6 +40,7 @@ func (m *AgentsMethods) handleCreate(ctx context.Context, client *gateway.Client
 		LocalRuntimeKind  json.RawMessage `json:"local_runtime_kind"`
 		BoundWorkerID     json.RawMessage `json:"bound_worker_id"`
 		WorkerEndpointID  json.RawMessage `json:"worker_endpoint_id"`
+		WorkspaceKey      json.RawMessage `json:"workspace_key"`
 		// Per-agent config overrides
 		ToolsConfig      json.RawMessage `json:"tools_config,omitempty"`
 		SubagentsConfig  json.RawMessage `json:"subagents_config,omitempty"`
@@ -147,13 +148,20 @@ func (m *AgentsMethods) handleCreate(ctx context.Context, client *gateway.Client
 				return
 			}
 		}
+		var workspaceKey string
+		if len(params.WorkspaceKey) > 0 {
+			if err := json.Unmarshal(params.WorkspaceKey, &workspaceKey); err != nil {
+				client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, "workspace_key must be a string"))
+				return
+			}
+		}
 
 		executionMode = store.NormalizeAgentExecutionMode(executionMode)
 		if err := store.ValidateWorkerEndpointID(workerEndpointID); err != nil {
 			client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, err.Error()))
 			return
 		}
-		if err := store.ValidateAgentExecutionSettings(executionMode, localRuntimeKind, boundWorkerID, workerEndpointID); err != nil {
+		if err := store.ValidateAgentExecutionSettings(executionMode, localRuntimeKind, boundWorkerID, workerEndpointID, workspaceKey); err != nil {
 			client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, err.Error()))
 			return
 		}
@@ -171,6 +179,7 @@ func (m *AgentsMethods) handleCreate(ctx context.Context, client *gateway.Client
 			LocalRuntimeKind:   localRuntimeKind,
 			BoundWorkerID:      boundWorkerID,
 			WorkerEndpointID:   workerEndpointID,
+			WorkspaceKey:       workspaceKey,
 			ContextWindow:      params.ContextWindow,
 			MaxToolIterations:  params.MaxToolIterations,
 			BudgetMonthlyCents: params.BudgetCents,

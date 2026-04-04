@@ -120,6 +120,7 @@ func TestHTTPAgentUpdatePersistsWorkerEndpointID(t *testing.T) {
 		"local_runtime_kind": "wails_desktop",
 		"worker_endpoint_id": endpointID,
 		"bound_worker_id":    "worker-123",
+		"workspace_key":      "desktop-main",
 	})
 	if err != nil {
 		t.Fatalf("marshal body: %v", err)
@@ -148,5 +149,8 @@ func TestHTTPAgentUpdatePersistsWorkerEndpointID(t *testing.T) {
 	}
 	if got, ok := stub.updates["bound_worker_id"].(string); !ok || got != "worker-123" {
 		t.Fatalf("bound_worker_id = %#v, want string %q", stub.updates["bound_worker_id"], "worker-123")
+	}
+	if got, ok := stub.updates["workspace_key"].(string); !ok || got != "desktop-main" {
+		t.Fatalf("workspace_key = %#v, want string %q", stub.updates["workspace_key"], "desktop-main")
 	}
 }

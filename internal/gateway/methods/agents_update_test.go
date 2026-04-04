@@ -127,6 +127,7 @@ func TestHandleUpdate_PersistsLocalWorkerSettings(t *testing.T) {
 		"local_runtime_kind": "wails_desktop",
 		"worker_endpoint_id": uuid.NewString(),
 		"bound_worker_id":    "worker-456",
+		"workspace_key":      "desktop-main",
 	})
 
 	m.handleUpdate(context.Background(), nullClient(), req)
@@ -145,6 +146,39 @@ func TestHandleUpdate_PersistsLocalWorkerSettings(t *testing.T) {
 	}
 	if got := stub.updates["bound_worker_id"]; got != "worker-456" {
 		t.Fatalf("bound_worker_id = %#v, want %q", got, "worker-456")
+	}
+	if got := stub.updates["workspace_key"]; got != "desktop-main" {
+		t.Fatalf("workspace_key = %#v, want %q", got, "desktop-main")
+	}
+}
+
+func TestHandleUpdate_RejectsOpencodeLocalWorkerWithoutWorkspaceKey(t *testing.T) {
+	stub := &updateCaptureStore{agent: &store.AgentData{BaseModel: store.BaseModel{ID: uuid.New()}, AgentKey: "agent-1", ExecutionMode: store.AgentExecutionModeServer}}
+	m := newManagedMethods(t, stub)
+	client := responseClient()
+
+	req := buildUpdateRequest(t, map[string]any{
+		"agentId":            "agent-1",
+		"execution_mode":     store.AgentExecutionModeLocalWorker,
+		"local_runtime_kind": "opencode",
+		"worker_endpoint_id": uuid.NewString(),
+	})
+
+	m.handleUpdate(context.Background(), client, req)
+
+	if stub.updated {
+		t.Fatal("agentStore.Update should not be called without workspace_key")
+	}
+
+	resp := readResponse(t, client)
+	if resp.OK {
+		t.Fatal("expected error response for missing workspace_key")
+	}
+	if resp.Error == nil {
+		t.Fatal("expected error details in response")
+	}
+	if !strings.Contains(resp.Error.Message, "workspace_key") {
+		t.Fatalf("error message = %q, want workspace_key validation failure", resp.Error.Message)
 	}
 }
 

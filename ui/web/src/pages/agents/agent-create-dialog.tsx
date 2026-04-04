@@ -49,6 +49,7 @@ export function AgentCreateDialog({ open, onOpenChange, onCreate }: AgentCreateD
   const [executionMode, setExecutionMode] = useState<"server" | "local_worker">("server");
   const [localRuntimeKind, setLocalRuntimeKind] = useState("");
   const [workerEndpointId, setWorkerEndpointId] = useState("");
+  const [workspaceKey, setWorkspaceKey] = useState("");
   const [description, setDescription] = useState("");
   const [selfEvolve, setSelfEvolve] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -100,6 +101,7 @@ export function AgentCreateDialog({ open, onOpenChange, onCreate }: AgentCreateD
         execution_mode: executionMode,
         local_runtime_kind: executionMode === "local_worker" ? localRuntimeKind.trim() : undefined,
         worker_endpoint_id: executionMode === "local_worker" ? workerEndpointId : undefined,
+        workspace_key: executionMode === "local_worker" && localRuntimeKind.trim() === "opencode" ? workspaceKey.trim() : undefined,
         other_config: Object.keys(otherConfig).length > 0 ? otherConfig : undefined,
       });
       onOpenChange(false);
@@ -113,6 +115,7 @@ export function AgentCreateDialog({ open, onOpenChange, onCreate }: AgentCreateD
       setExecutionMode("server");
       setLocalRuntimeKind("");
       setWorkerEndpointId("");
+      setWorkspaceKey("");
       setDescription("");
       setSelfEvolve(false);
       setError("");
@@ -277,6 +280,20 @@ export function AgentCreateDialog({ open, onOpenChange, onCreate }: AgentCreateD
                   </Select>
                   <p className="text-xs text-muted-foreground">{t("create.workerEndpointHint")}</p>
                 </div>
+
+                {localRuntimeKind.trim() === "opencode" && (
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="workspaceKey">{t("create.workspaceKey")}</Label>
+                    <Input
+                      id="workspaceKey"
+                      value={workspaceKey}
+                      onChange={(e) => setWorkspaceKey(e.target.value)}
+                      placeholder={t("create.workspaceKeyPlaceholder")}
+                      className="text-base md:text-sm"
+                    />
+                    <p className="text-xs text-muted-foreground">{t("create.workspaceKeyHint")}</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -350,11 +367,11 @@ export function AgentCreateDialog({ open, onOpenChange, onCreate }: AgentCreateD
           {loading ? (
             <Button disabled>{t("create.creating")}</Button>
           ) : !verifyResult?.valid && selectedProviderId && model.trim() ? (
-            <Button onClick={handleVerifyAndCreate} disabled={verifying || !displayName.trim() || !agentKey.trim() || !isValidSlug(agentKey) || (agentType === "predefined" && !description.trim()) || (executionMode === "local_worker" && (!localRuntimeKind.trim() || !workerEndpointId))}>
+            <Button onClick={handleVerifyAndCreate} disabled={verifying || !displayName.trim() || !agentKey.trim() || !isValidSlug(agentKey) || (agentType === "predefined" && !description.trim()) || (executionMode === "local_worker" && (!localRuntimeKind.trim() || !workerEndpointId || (localRuntimeKind.trim() === "opencode" && !workspaceKey.trim())))}>
               {verifying ? t("create.checking") : t("create.checkAndCreate")}
             </Button>
           ) : (
-            <Button onClick={handleCreate} disabled={!displayName.trim() || !agentKey.trim() || !isValidSlug(agentKey) || !provider.trim() || !model.trim() || !verifyResult?.valid || (agentType === "predefined" && !description.trim()) || (executionMode === "local_worker" && (!localRuntimeKind.trim() || !workerEndpointId))}>
+            <Button onClick={handleCreate} disabled={!displayName.trim() || !agentKey.trim() || !isValidSlug(agentKey) || !provider.trim() || !model.trim() || !verifyResult?.valid || (agentType === "predefined" && !description.trim()) || (executionMode === "local_worker" && (!localRuntimeKind.trim() || !workerEndpointId || (localRuntimeKind.trim() === "opencode" && !workspaceKey.trim())))}>
               {t("create.create")}
             </Button>
           )}

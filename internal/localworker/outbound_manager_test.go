@@ -133,6 +133,48 @@ func TestOutboundManager_DispatchesEnvelope(t *testing.T) {
 	}
 }
 
+func TestOutboundManager_CancelSendsJobCancelEnvelope(t *testing.T) {
+	tenantID := uuid.New()
+	endpointID := uuid.New()
+	server := newOutboundWSTestServer(t, "token-123")
+
+	endpointStore := &stubWorkerEndpointStore{
+		endpoint: &store.WorkerEndpointData{
+			BaseModel:   store.BaseModel{ID: endpointID},
+			TenantID:    tenantID,
+			Name:        "desktop-primary",
+			RuntimeKind: "opencode",
+			EndpointURL: httpToWebsocketURL(server.server.URL),
+			AuthToken:   "token-123",
+		},
+	}
+	mgr := NewOutboundManager(endpointStore)
+	ctx := store.WithTenantID(context.Background(), tenantID)
+
+	if err := mgr.Cancel(ctx, endpointID, "job-123", "task canceled by user"); err != nil {
+		t.Fatalf("Cancel error: %v", err)
+	}
+
+	server.waitForMessages(t, 1)
+	var got OutboundEnvelope
+	if err := json.Unmarshal(server.message(0), &got); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+	if got.Type != OutboundEnvelopeJobCancel {
+		t.Fatalf("Type = %q, want %q", got.Type, OutboundEnvelopeJobCancel)
+	}
+	gotPayload, ok := got.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("payload type = %T, want map[string]any", got.Payload)
+	}
+	if gotPayload["jobId"] != "job-123" {
+		t.Fatalf("payload.jobId = %#v, want %q", gotPayload["jobId"], "job-123")
+	}
+	if gotPayload["reason"] != "task canceled by user" {
+		t.Fatalf("payload.reason = %#v, want %q", gotPayload["reason"], "task canceled by user")
+	}
+}
+
 func TestOutboundManager_ScopesCacheByTenant(t *testing.T) {
 	tenantA := uuid.New()
 	tenantB := uuid.New()
@@ -195,7 +237,7 @@ func TestOutboundManager_ScopesCacheByTenant(t *testing.T) {
 	}
 }
 
-func TestOutboundManager_DoesNotRetryWriteFailures(t *testing.T) {
+func TestOutboundManager_ReconnectsAfterServerSideClose(t *testing.T) {
 	tenantID := uuid.New()
 	endpointID := uuid.New()
 	server := newOutboundWSTestServer(t, "token-123")
@@ -219,18 +261,18 @@ func TestOutboundManager_DoesNotRetryWriteFailures(t *testing.T) {
 	server.waitForMessages(t, 1)
 
 	server.closeAllConnections(t)
+	waitForClientDrop(t, mgr, tenantID, endpointID)
 
-	err := mgr.Dispatch(ctx, endpointID, OutboundEnvelope{Type: OutboundEnvelopeJobDispatch, Payload: map[string]any{"jobId": "job-2"}})
-	if err == nil {
-		t.Fatal("Dispatch error = nil, want write failure")
+	if err := mgr.Dispatch(ctx, endpointID, OutboundEnvelope{Type: OutboundEnvelopeJobDispatch, Payload: map[string]any{"jobId": "job-2"}}); err != nil {
+		t.Fatalf("second Dispatch error: %v", err)
 	}
+	server.waitForMessages(t, 1)
 
-	time.Sleep(100 * time.Millisecond)
-	if got := server.connectCount(); got != 1 {
-		t.Fatalf("connect count = %d, want 1", got)
+	if got := server.connectCount(); got != 2 {
+		t.Fatalf("connect count = %d, want 2", got)
 	}
-	if got := server.messageCount(); got != 1 {
-		t.Fatalf("message count = %d, want 1", got)
+	if got := server.messageCount(); got != 2 {
+		t.Fatalf("message count = %d, want 2", got)
 	}
 }
 
@@ -530,6 +572,23 @@ func cachedOutboundClient(t *testing.T, mgr *OutboundManager, tenantID, endpoint
 	}
 	t.Fatalf("cached outbound client not found for tenant %s endpoint %s", tenantID, endpointID)
 	return nil
+}
+
+func waitForClientDrop(t *testing.T, mgr *OutboundManager, tenantID, endpointID uuid.UUID) {
+	t.Helper()
+
+	deadline := time.Now().Add(1 * time.Second)
+	key := outboundClientKey{tenantID: tenantID, endpointID: endpointID}
+	for time.Now().Before(deadline) {
+		mgr.mu.Lock()
+		client := mgr.clients[key]
+		mgr.mu.Unlock()
+		if client == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for outbound client drop for tenant %s endpoint %s", tenantID, endpointID)
 }
 
 var _ store.WorkerEndpointStore = (*stubWorkerEndpointStore)(nil)

@@ -14,6 +14,8 @@ interface ExecutionSectionProps {
   onLocalRuntimeKindChange: (value: string) => void;
   workerEndpointId: string;
   onWorkerEndpointIdChange: (value: string) => void;
+  workspaceKey: string;
+  onWorkspaceKeyChange: (value: string) => void;
 }
 
 export function ExecutionSection({
@@ -23,6 +25,8 @@ export function ExecutionSection({
   onLocalRuntimeKindChange,
   workerEndpointId,
   onWorkerEndpointIdChange,
+  workspaceKey,
+  onWorkspaceKeyChange,
 }: ExecutionSectionProps) {
   const { t } = useTranslation("agents");
   const { items: workerEndpoints } = useWorkerEndpoints();
@@ -75,6 +79,20 @@ export function ExecutionSection({
             </Select>
             <p className="text-xs text-muted-foreground">{t("execution.workerEndpointHint")}</p>
           </div>
+
+          {localRuntimeKind.trim() === "opencode" && (
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="workspaceKey" className="text-xs">{t("execution.workspaceKeyLabel")}</Label>
+              <Input
+                id="workspaceKey"
+                value={workspaceKey}
+                onChange={(e) => onWorkspaceKeyChange(e.target.value)}
+                placeholder={t("execution.workspaceKeyPlaceholder")}
+                className="text-base md:text-sm"
+              />
+              <p className="text-xs text-muted-foreground">{t("execution.workspaceKeyHint")}</p>
+            </div>
+          )}
         </div>
       )}
     </section>
