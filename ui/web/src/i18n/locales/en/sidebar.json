@@ -30,6 +30,7 @@
     "logs": "Logs",
     "storage": "Storage",
     "providers": "Providers",
+    "workerEndpoints": "Worker Endpoints",
     "config": "Config",
     "approvals": "Approvals",
     "importExport": "Import & Export",

@@ -101,9 +101,9 @@
     "localRuntimeKind": "Loại runtime",
     "localRuntimeKindPlaceholder": "vd: docker, wails_desktop",
     "localRuntimeKindHint": "Mã runtime đơn giản cho backend local worker.",
-    "boundWorkerId": "ID worker đã gắn",
-    "boundWorkerIdPlaceholder": "worker-123",
-    "boundWorkerIdHint": "ID local worker chính xác mà agent này sẽ dùng.",
+    "workerEndpoint": "Điểm cuối worker",
+    "workerEndpointPlaceholder": "Chọn điểm cuối worker",
+    "workerEndpointHint": "Chọn profile điểm cuối worker đã lưu mà agent này sẽ dùng.",
     "cancel": "Hủy",
     "create": "Tạo",
     "creating": "Đang tạo...",
@@ -436,9 +436,46 @@
     "runtimeKindLabel": "Loại runtime",
     "runtimeKindPlaceholder": "vd: docker, wails_desktop",
     "runtimeKindHint": "Mã runtime đơn giản cho backend local worker.",
-    "boundWorkerIdLabel": "ID worker đã gắn",
-    "boundWorkerIdPlaceholder": "worker-123",
-    "boundWorkerIdHint": "ID local worker chính xác mà agent này sẽ dùng."
+    "workerEndpointLabel": "Điểm cuối worker",
+    "workerEndpointPlaceholder": "Chọn điểm cuối worker",
+    "workerEndpointHint": "Chọn profile điểm cuối worker đã lưu mà agent này sẽ dùng."
+  },
+  "workerEndpoints": {
+    "title": "Điểm cuối worker",
+    "description": "Quản lý các profile điểm cuối worker outbound đã lưu cho agent local-worker.",
+    "add": "Thêm điểm cuối",
+    "emptyTitle": "Chưa có điểm cuối worker nào",
+    "emptyDescription": "Tạo profile điểm cuối worker trước khi gán cho agent local-worker.",
+    "tokenMasked": "Đã lưu",
+    "columns": {
+      "name": "Tên",
+      "runtime": "Runtime",
+      "url": "URL điểm cuối",
+      "token": "Auth Token"
+    },
+    "form": {
+      "createTitle": "Tạo điểm cuối worker",
+      "editTitle": "Sửa điểm cuối worker",
+      "name": "Tên",
+      "runtimeKind": "Loại runtime",
+      "endpointUrl": "URL điểm cuối",
+      "authToken": "Auth Token",
+      "required": "Tất cả trường đều bắt buộc.",
+      "failed": "Lưu điểm cuối worker thất bại"
+    },
+    "delete": {
+      "title": "Xóa điểm cuối worker",
+      "description": "Xóa \"{{name}}\"? Các agent đang dùng nó sẽ cần một điểm cuối khác.",
+      "confirm": "Xóa"
+    },
+    "toast": {
+      "created": "Đã tạo điểm cuối worker",
+      "createFailed": "Tạo điểm cuối worker thất bại",
+      "updated": "Đã cập nhật điểm cuối worker",
+      "updateFailed": "Cập nhật điểm cuối worker thất bại",
+      "deleted": "Đã xóa điểm cuối worker",
+      "deleteFailed": "Xóa điểm cuối worker thất bại"
+    }
   },
   "workspace": {
     "title": "Workspace",

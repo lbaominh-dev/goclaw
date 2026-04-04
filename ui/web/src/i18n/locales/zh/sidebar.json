@@ -28,6 +28,7 @@
     "overview": "概览",
     "pendingMessages": "待处理消息",
     "providers": "Provider",
+    "workerEndpoints": "Worker 端点",
     "realtimeEvents": "实时事件",
     "sessions": "Session",
     "skills": "Skill",

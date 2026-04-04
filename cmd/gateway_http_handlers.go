@@ -8,12 +8,13 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/tools"
 )
 
-// wireHTTP creates HTTP handlers (agents + skills + traces + MCP + channel instances + providers + builtin tools + pending messages).
-func wireHTTP(stores *store.Stores, defaultWorkspace, dataDir, bundledSkillsDir string, msgBus *bus.MessageBus, toolsReg *tools.Registry, providerReg *providers.Registry, isOwner func(string) bool, gatewayAddr string, mcpToolLister httpapi.MCPToolLister) (*httpapi.AgentsHandler, *httpapi.SkillsHandler, *httpapi.TracesHandler, *httpapi.MCPHandler, *httpapi.ChannelInstancesHandler, *httpapi.ProvidersHandler, *httpapi.BuiltinToolsHandler, *httpapi.PendingMessagesHandler, *httpapi.TeamEventsHandler, *httpapi.SecureCLIHandler, *httpapi.MCPUserCredentialsHandler) {
+// wireHTTP creates HTTP handlers (agents + skills + traces + MCP + worker endpoints + channel instances + providers + builtin tools + pending messages).
+func wireHTTP(stores *store.Stores, defaultWorkspace, dataDir, bundledSkillsDir string, msgBus *bus.MessageBus, toolsReg *tools.Registry, providerReg *providers.Registry, isOwner func(string) bool, gatewayAddr string, mcpToolLister httpapi.MCPToolLister) (*httpapi.AgentsHandler, *httpapi.SkillsHandler, *httpapi.TracesHandler, *httpapi.MCPHandler, *httpapi.WorkerEndpointsHandler, *httpapi.ChannelInstancesHandler, *httpapi.ProvidersHandler, *httpapi.BuiltinToolsHandler, *httpapi.PendingMessagesHandler, *httpapi.TeamEventsHandler, *httpapi.SecureCLIHandler, *httpapi.MCPUserCredentialsHandler) {
 	var agentsH *httpapi.AgentsHandler
 	var skillsH *httpapi.SkillsHandler
 	var tracesH *httpapi.TracesHandler
 	var mcpH *httpapi.MCPHandler
+	var workerEndpointsH *httpapi.WorkerEndpointsHandler
 	var channelInstancesH *httpapi.ChannelInstancesHandler
 	var providersH *httpapi.ProvidersHandler
 	var builtinToolsH *httpapi.BuiltinToolsHandler
@@ -51,6 +52,10 @@ func wireHTTP(stores *store.Stores, defaultWorkspace, dataDir, bundledSkillsDir 
 	var mcpUserCredsH *httpapi.MCPUserCredentialsHandler
 	if stores != nil && stores.MCP != nil {
 		mcpUserCredsH = httpapi.NewMCPUserCredentialsHandler(stores.MCP, stores.Tenants)
+	}
+
+	if stores != nil && stores.WorkerEndpoints != nil {
+		workerEndpointsH = httpapi.NewWorkerEndpointsHandler(stores.WorkerEndpoints, msgBus)
 	}
 
 	if stores != nil && stores.ChannelInstances != nil {
@@ -92,5 +97,5 @@ func wireHTTP(stores *store.Stores, defaultWorkspace, dataDir, bundledSkillsDir 
 		secureCLIH = httpapi.NewSecureCLIHandler(stores.SecureCLI, msgBus)
 	}
 
-	return agentsH, skillsH, tracesH, mcpH, channelInstancesH, providersH, builtinToolsH, pendingMessagesH, teamEventsH, secureCLIH, mcpUserCredsH
+	return agentsH, skillsH, tracesH, mcpH, workerEndpointsH, channelInstancesH, providersH, builtinToolsH, pendingMessagesH, teamEventsH, secureCLIH, mcpUserCredsH
 }

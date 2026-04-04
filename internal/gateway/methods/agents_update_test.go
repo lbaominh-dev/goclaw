@@ -125,6 +125,7 @@ func TestHandleUpdate_PersistsLocalWorkerSettings(t *testing.T) {
 		"agentId":            "agent-1",
 		"execution_mode":     store.AgentExecutionModeLocalWorker,
 		"local_runtime_kind": "wails_desktop",
+		"worker_endpoint_id": uuid.NewString(),
 		"bound_worker_id":    "worker-456",
 	})
 
@@ -138,6 +139,9 @@ func TestHandleUpdate_PersistsLocalWorkerSettings(t *testing.T) {
 	}
 	if got := stub.updates["local_runtime_kind"]; got != "wails_desktop" {
 		t.Fatalf("local_runtime_kind = %#v, want %q", got, "wails_desktop")
+	}
+	if got := stub.updates["worker_endpoint_id"]; got == nil || got == "" {
+		t.Fatalf("worker_endpoint_id = %#v, want non-empty value", got)
 	}
 	if got := stub.updates["bound_worker_id"]; got != "worker-456" {
 		t.Fatalf("bound_worker_id = %#v, want %q", got, "worker-456")
@@ -171,7 +175,40 @@ func TestHandleUpdate_RejectsInvalidLocalWorkerConfig(t *testing.T) {
 	if resp.Error.Code != protocol.ErrInvalidRequest {
 		t.Fatalf("error code = %q, want %q", resp.Error.Code, protocol.ErrInvalidRequest)
 	}
-	if !strings.Contains(resp.Error.Message, "local_runtime_kind and bound_worker_id") {
+	if !strings.Contains(resp.Error.Message, "local_runtime_kind and worker_endpoint_id") {
 		t.Fatalf("error message = %q, want local worker validation failure", resp.Error.Message)
+	}
+}
+
+func TestHandleUpdate_RejectsMalformedWorkerEndpointID(t *testing.T) {
+	stub := &updateCaptureStore{agent: &store.AgentData{BaseModel: store.BaseModel{ID: uuid.New()}, AgentKey: "agent-1", ExecutionMode: store.AgentExecutionModeServer}}
+	m := newManagedMethods(t, stub)
+	client := responseClient()
+
+	req := buildUpdateRequest(t, map[string]any{
+		"agentId":            "agent-1",
+		"execution_mode":     store.AgentExecutionModeLocalWorker,
+		"local_runtime_kind": "wails_desktop",
+		"worker_endpoint_id": "not-a-uuid",
+	})
+
+	m.handleUpdate(context.Background(), client, req)
+
+	if stub.updated {
+		t.Fatal("agentStore.Update should not be called for malformed worker endpoint id")
+	}
+
+	resp := readResponse(t, client)
+	if resp.OK {
+		t.Fatal("expected error response for malformed worker endpoint id")
+	}
+	if resp.Error == nil {
+		t.Fatal("expected error details in response")
+	}
+	if resp.Error.Code != protocol.ErrInvalidRequest {
+		t.Fatalf("error code = %q, want %q", resp.Error.Code, protocol.ErrInvalidRequest)
+	}
+	if !strings.Contains(resp.Error.Message, "worker_endpoint_id") {
+		t.Fatalf("error message = %q, want worker_endpoint_id validation failure", resp.Error.Message)
 	}
 }

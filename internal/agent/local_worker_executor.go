@@ -15,10 +15,13 @@ func (l *Loop) dispatchLocalWorkerRun(ctx context.Context, req RunRequest) (*Run
 	if l.localWorkerDispatcher == nil {
 		return nil, fmt.Errorf("local worker dispatcher not configured")
 	}
+	if l.workerEndpointID == "" {
+		return nil, fmt.Errorf("local worker endpoint binding is required")
+	}
 	rc := store.RunContextFromCtx(ctx)
 	input := localworker.DispatchJobInput{
 		TenantID:          store.TenantIDFromContext(ctx),
-		WorkerID:          l.boundWorkerID,
+		WorkerEndpointID:  l.workerEndpointID,
 		RuntimeKind:       l.localRuntimeKind,
 		AgentID:           l.agentUUID,
 		AgentKey:          l.id,
@@ -67,7 +70,7 @@ func (l *Loop) dispatchLocalWorkerRun(ctx context.Context, req RunRequest) (*Run
 		Payload: map[string]any{
 			"phase":    "queued_local_worker",
 			"jobId":    job.ID.String(),
-			"workerId": l.boundWorkerID,
+			"workerId": l.workerEndpointID,
 		},
 	})
 	return &RunResult{

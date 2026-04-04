@@ -35,7 +35,7 @@ export function AgentOverviewTab({ agent, onUpdate, heartbeat, onManageCodexPool
   const [isDefault, setIsDefault] = useState(agent.is_default);
   const [executionMode, setExecutionMode] = useState(agent.execution_mode ?? "server");
   const [localRuntimeKind, setLocalRuntimeKind] = useState(agent.local_runtime_kind ?? "");
-  const [boundWorkerId, setBoundWorkerId] = useState(agent.bound_worker_id ?? "");
+  const [workerEndpointId, setWorkerEndpointId] = useState(agent.worker_endpoint_id ?? "");
 
   // Model & Budget
   const [provider, setProvider] = useState(agent.provider);
@@ -94,7 +94,7 @@ export function AgentOverviewTab({ agent, onUpdate, heartbeat, onManageCodexPool
         budget_monthly_cents: budgetCents,
         execution_mode: executionMode,
         local_runtime_kind: executionMode === "local_worker" ? localRuntimeKind.trim() : null,
-        bound_worker_id: executionMode === "local_worker" ? boundWorkerId.trim() : null,
+        worker_endpoint_id: executionMode === "local_worker" ? workerEndpointId : null,
         memory_config: mem,
         subagents_config: subEnabled ? sub : null,
         tools_config: toolsEnabled
@@ -145,8 +145,8 @@ export function AgentOverviewTab({ agent, onUpdate, heartbeat, onManageCodexPool
         onExecutionModeChange={setExecutionMode}
         localRuntimeKind={localRuntimeKind}
         onLocalRuntimeKindChange={setLocalRuntimeKind}
-        boundWorkerId={boundWorkerId}
-        onBoundWorkerIdChange={setBoundWorkerId}
+        workerEndpointId={workerEndpointId}
+        onWorkerEndpointIdChange={setWorkerEndpointId}
       />
 
       <ChatGPTOAuthRoutingSummarySection agent={agent} onManage={onManageCodexPool} />
@@ -191,7 +191,7 @@ export function AgentOverviewTab({ agent, onUpdate, heartbeat, onManageCodexPool
       <StickySaveBar
         onSave={handleSave}
         saving={saving}
-        disabled={llmSaveBlocked || (executionMode === "local_worker" && (!localRuntimeKind.trim() || !boundWorkerId.trim()))}
+        disabled={llmSaveBlocked || (executionMode === "local_worker" && (!localRuntimeKind.trim() || !workerEndpointId))}
         label={t("general.saveChanges")}
         savingLabel={t("general.saving")}
       />

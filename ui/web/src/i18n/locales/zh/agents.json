@@ -101,9 +101,9 @@
     "localRuntimeKind": "运行时类型",
     "localRuntimeKindPlaceholder": "例如：docker、wails_desktop",
     "localRuntimeKindHint": "本地 worker 后端使用的纯文本运行时标识。",
-    "boundWorkerId": "绑定 Worker ID",
-    "boundWorkerIdPlaceholder": "worker-123",
-    "boundWorkerIdHint": "这个 agent 应使用的准确 local worker ID。",
+    "workerEndpoint": "Worker 端点",
+    "workerEndpointPlaceholder": "选择 worker 端点",
+    "workerEndpointHint": "选择这个 agent 应使用的已保存 worker 端点配置。",
     "cancel": "取消",
     "create": "创建",
     "creating": "创建中...",
@@ -436,9 +436,46 @@
     "runtimeKindLabel": "运行时类型",
     "runtimeKindPlaceholder": "例如：docker、wails_desktop",
     "runtimeKindHint": "本地 worker 后端使用的纯文本运行时标识。",
-    "boundWorkerIdLabel": "绑定 Worker ID",
-    "boundWorkerIdPlaceholder": "worker-123",
-    "boundWorkerIdHint": "这个 agent 应使用的准确 local worker ID。"
+    "workerEndpointLabel": "Worker 端点",
+    "workerEndpointPlaceholder": "选择 worker 端点",
+    "workerEndpointHint": "选择这个 agent 应使用的已保存 worker 端点配置。"
+  },
+  "workerEndpoints": {
+    "title": "Worker 端点",
+    "description": "管理供 local-worker agent 使用的已保存 outbound worker 端点配置。",
+    "add": "新增端点",
+    "emptyTitle": "还没有 worker 端点",
+    "emptyDescription": "在分配 local-worker agent 之前，先创建一个 worker 端点配置。",
+    "tokenMasked": "已保存",
+    "columns": {
+      "name": "名称",
+      "runtime": "运行时",
+      "url": "端点 URL",
+      "token": "认证令牌"
+    },
+    "form": {
+      "createTitle": "创建 Worker 端点",
+      "editTitle": "编辑 Worker 端点",
+      "name": "名称",
+      "runtimeKind": "运行时类型",
+      "endpointUrl": "端点 URL",
+      "authToken": "认证令牌",
+      "required": "所有字段都是必填项。",
+      "failed": "保存 worker 端点失败"
+    },
+    "delete": {
+      "title": "删除 Worker 端点",
+      "description": "删除“{{name}}”？使用它的 agent 将需要改用其他端点。",
+      "confirm": "删除"
+    },
+    "toast": {
+      "created": "Worker 端点已创建",
+      "createFailed": "创建 worker 端点失败",
+      "updated": "Worker 端点已更新",
+      "updateFailed": "更新 worker 端点失败",
+      "deleted": "Worker 端点已删除",
+      "deleteFailed": "删除 worker 端点失败"
+    }
   },
   "workspace": {
     "title": "工作区",

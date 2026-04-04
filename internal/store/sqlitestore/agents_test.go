@@ -6,14 +6,18 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
 func TestSQLiteAgentStore_CreateAndGet_LocalWorkerFields(t *testing.T) {
-	agentStore, ctx, _ := newTestSQLiteAgentStore(t)
+	agentStore, ctx, db := newTestSQLiteAgentStore(t)
+	endpointID := createSQLiteWorkerEndpoint(t, db, ctx, "sqlite-local-worker-endpoint")
 
 	agent := &store.AgentData{
 		TenantID:            store.MasterTenantID,
@@ -32,6 +36,7 @@ func TestSQLiteAgentStore_CreateAndGet_LocalWorkerFields(t *testing.T) {
 		LocalRuntimeKind:    "wails_desktop",
 		BoundWorkerID:       "worker-123",
 	}
+	setAgentWorkerEndpointID(t, agent, endpointID)
 
 	if err := agentStore.Create(ctx, agent); err != nil {
 		t.Fatalf("Create error: %v", err)
@@ -51,66 +56,14 @@ func TestSQLiteAgentStore_CreateAndGet_LocalWorkerFields(t *testing.T) {
 	if got.BoundWorkerID != "worker-123" {
 		t.Fatalf("BoundWorkerID = %q, want worker-123", got.BoundWorkerID)
 	}
-}
-
-func TestSQLiteAgentExecutionSettingsValidation(t *testing.T) {
-	tests := []struct {
-		name    string
-		agent   store.AgentData
-		wantErr bool
-	}{
-		{
-			name:  "default server mode is valid",
-			agent: store.AgentData{},
-		},
-		{
-			name: "server mode rejects local fields",
-			agent: store.AgentData{
-				ExecutionMode: store.AgentExecutionModeServer,
-				BoundWorkerID: "worker-123",
-			},
-			wantErr: true,
-		},
-		{
-			name: "invalid execution mode rejected",
-			agent: store.AgentData{
-				ExecutionMode: "invalid",
-			},
-			wantErr: true,
-		},
-		{
-			name: "local worker requires both fields",
-			agent: store.AgentData{
-				ExecutionMode:    store.AgentExecutionModeLocalWorker,
-				LocalRuntimeKind: "wails_desktop",
-			},
-			wantErr: true,
-		},
-		{
-			name: "local worker with both fields is valid",
-			agent: store.AgentData{
-				ExecutionMode:    store.AgentExecutionModeLocalWorker,
-				LocalRuntimeKind: "wails_desktop",
-				BoundWorkerID:    "worker-123",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := store.ValidateAgentExecutionSettings(tt.agent.ExecutionMode, tt.agent.LocalRuntimeKind, tt.agent.BoundWorkerID)
-			if tt.wantErr && err == nil {
-				t.Fatal("expected validation error, got nil")
-			}
-			if !tt.wantErr && err != nil {
-				t.Fatalf("unexpected validation error: %v", err)
-			}
-		})
+	if gotWorkerEndpointID := getAgentWorkerEndpointID(t, got); gotWorkerEndpointID != endpointID {
+		t.Fatalf("WorkerEndpointID = %q, want %q", gotWorkerEndpointID, endpointID)
 	}
 }
 
-func TestSQLiteAgentStore_UpdateRejectsInvalidLocalWorkerSettings(t *testing.T) {
-	agentStore, ctx, _ := newTestSQLiteAgentStore(t)
+func TestAgentExecutionSettingsRequireWorkerEndpointID(t *testing.T) {
+	agentStore, ctx, db := newTestSQLiteAgentStore(t)
+	endpointID := createSQLiteWorkerEndpoint(t, db, ctx, "sqlite-required-endpoint")
 
 	agent := &store.AgentData{
 		TenantID:            store.MasterTenantID,
@@ -145,9 +98,17 @@ func TestSQLiteAgentStore_UpdateRejectsInvalidLocalWorkerSettings(t *testing.T) 
 	if err := agentStore.Update(ctx, agent.ID, map[string]any{
 		"execution_mode":     store.AgentExecutionModeLocalWorker,
 		"local_runtime_kind": "wails_desktop",
-		"bound_worker_id":    "worker-123",
+		"worker_endpoint_id": endpointID,
 	}); err != nil {
 		t.Fatalf("valid local_worker update error: %v", err)
+	}
+
+	got, err = agentStore.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetByID after valid local_worker update error: %v", err)
+	}
+	if gotWorkerEndpointID := getAgentWorkerEndpointID(t, got); gotWorkerEndpointID != endpointID {
+		t.Fatalf("WorkerEndpointID after valid local_worker update = %q, want %q", gotWorkerEndpointID, endpointID)
 	}
 
 	if err := agentStore.Update(ctx, agent.ID, map[string]any{"execution_mode": store.AgentExecutionModeServer}); err == nil {
@@ -158,7 +119,7 @@ func TestSQLiteAgentStore_UpdateRejectsInvalidLocalWorkerSettings(t *testing.T) 
 	if err != nil {
 		t.Fatalf("GetByID after failed server update error: %v", err)
 	}
-	if got.ExecutionMode != store.AgentExecutionModeLocalWorker || got.LocalRuntimeKind != "wails_desktop" || got.BoundWorkerID != "worker-123" {
+	if got.ExecutionMode != store.AgentExecutionModeLocalWorker || got.LocalRuntimeKind != "wails_desktop" || getAgentWorkerEndpointID(t, got) != endpointID {
 		t.Fatalf("agent state changed after failed server update: %+v", got)
 	}
 }
@@ -166,6 +127,7 @@ func TestSQLiteAgentStore_UpdateRejectsInvalidLocalWorkerSettings(t *testing.T) 
 func TestSQLiteAgentStore_UpdateTransitionsLocalWorkerToServer(t *testing.T) {
 	agentStore, ctx, _ := newTestSQLiteAgentStore(t)
 	db := getSQLiteAgentTestDB(t, agentStore)
+	endpointID := createSQLiteWorkerEndpoint(t, db, ctx, "sqlite-transition-endpoint")
 
 	agent := &store.AgentData{
 		TenantID:            store.MasterTenantID,
@@ -184,6 +146,7 @@ func TestSQLiteAgentStore_UpdateTransitionsLocalWorkerToServer(t *testing.T) {
 		LocalRuntimeKind:    "wails_desktop",
 		BoundWorkerID:       "worker-123",
 	}
+	setAgentWorkerEndpointID(t, agent, endpointID)
 	if err := agentStore.Create(ctx, agent); err != nil {
 		t.Fatalf("Create error: %v", err)
 	}
@@ -192,6 +155,7 @@ func TestSQLiteAgentStore_UpdateTransitionsLocalWorkerToServer(t *testing.T) {
 		"execution_mode":     store.AgentExecutionModeServer,
 		"local_runtime_kind": nil,
 		"bound_worker_id":    nil,
+		"worker_endpoint_id": nil,
 	}); err != nil {
 		t.Fatalf("Update error: %v", err)
 	}
@@ -209,9 +173,12 @@ func TestSQLiteAgentStore_UpdateTransitionsLocalWorkerToServer(t *testing.T) {
 	if got.BoundWorkerID != "" {
 		t.Fatalf("BoundWorkerID = %q, want empty", got.BoundWorkerID)
 	}
+	if gotWorkerEndpointID := getAgentWorkerEndpointID(t, got); gotWorkerEndpointID != "" {
+		t.Fatalf("WorkerEndpointID = %q, want empty", gotWorkerEndpointID)
+	}
 
-	var localRuntimeKind, boundWorkerID sql.NullString
-	if err := db.QueryRowContext(ctx, `SELECT local_runtime_kind, bound_worker_id FROM agents WHERE id = ? AND tenant_id = ?`, agent.ID, store.MasterTenantID).Scan(&localRuntimeKind, &boundWorkerID); err != nil {
+	var localRuntimeKind, boundWorkerID, workerEndpointID sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT local_runtime_kind, bound_worker_id, worker_endpoint_id FROM agents WHERE id = ? AND tenant_id = ?`, agent.ID, store.MasterTenantID).Scan(&localRuntimeKind, &boundWorkerID, &workerEndpointID); err != nil {
 		t.Fatalf("raw agent query error: %v", err)
 	}
 	if localRuntimeKind.Valid {
@@ -219,6 +186,9 @@ func TestSQLiteAgentStore_UpdateTransitionsLocalWorkerToServer(t *testing.T) {
 	}
 	if boundWorkerID.Valid {
 		t.Fatalf("bound_worker_id persisted as %q, want NULL", boundWorkerID.String)
+	}
+	if workerEndpointID.Valid {
+		t.Fatalf("worker_endpoint_id persisted as %q, want NULL", workerEndpointID.String)
 	}
 }
 
@@ -304,6 +274,7 @@ func TestSQLiteAgentStore_CrossTenantUpdateSkipsSoftDeletedAgent(t *testing.T) {
 func TestSQLiteAgentStore_UpdateExecutionSettingsSkipsSoftDeletedAgent(t *testing.T) {
 	agentStore, _, db := newTestSQLiteAgentStore(t)
 	ctx := store.WithTenantID(context.Background(), store.MasterTenantID)
+	endpointID := createSQLiteWorkerEndpoint(t, db, ctx, "sqlite-soft-delete-endpoint")
 
 	agent := &store.AgentData{
 		TenantID:            store.MasterTenantID,
@@ -322,6 +293,7 @@ func TestSQLiteAgentStore_UpdateExecutionSettingsSkipsSoftDeletedAgent(t *testin
 		LocalRuntimeKind:    "wails_desktop",
 		BoundWorkerID:       "worker-123",
 	}
+	setAgentWorkerEndpointID(t, agent, endpointID)
 	if err := agentStore.Create(ctx, agent); err != nil {
 		t.Fatalf("Create error: %v", err)
 	}
@@ -335,13 +307,14 @@ func TestSQLiteAgentStore_UpdateExecutionSettingsSkipsSoftDeletedAgent(t *testin
 		"execution_mode":     store.AgentExecutionModeServer,
 		"local_runtime_kind": nil,
 		"bound_worker_id":    nil,
+		"worker_endpoint_id": nil,
 	}); err != nil {
 		t.Fatalf("Update error: %v", err)
 	}
 
 	var executionMode string
-	var localRuntimeKind, boundWorkerID sql.NullString
-	if err := db.QueryRowContext(ctx, `SELECT execution_mode, local_runtime_kind, bound_worker_id FROM agents WHERE id = ? AND tenant_id = ?`, agent.ID, store.MasterTenantID).Scan(&executionMode, &localRuntimeKind, &boundWorkerID); err != nil {
+	var localRuntimeKind, boundWorkerID, workerEndpointID sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT execution_mode, local_runtime_kind, bound_worker_id, worker_endpoint_id FROM agents WHERE id = ? AND tenant_id = ?`, agent.ID, store.MasterTenantID).Scan(&executionMode, &localRuntimeKind, &boundWorkerID, &workerEndpointID); err != nil {
 		t.Fatalf("raw agent query error: %v", err)
 	}
 	if executionMode != store.AgentExecutionModeLocalWorker {
@@ -353,6 +326,39 @@ func TestSQLiteAgentStore_UpdateExecutionSettingsSkipsSoftDeletedAgent(t *testin
 	if !boundWorkerID.Valid || boundWorkerID.String != "worker-123" {
 		t.Fatalf("bound_worker_id = %+v, want original value", boundWorkerID)
 	}
+	if !workerEndpointID.Valid || workerEndpointID.String != endpointID {
+		t.Fatalf("worker_endpoint_id = %+v, want original value", workerEndpointID)
+	}
+}
+
+func setAgentWorkerEndpointID(t *testing.T, agent *store.AgentData, endpointID string) {
+	t.Helper()
+	field := reflect.ValueOf(agent).Elem().FieldByName("WorkerEndpointID")
+	if !field.IsValid() {
+		t.Fatal("AgentData.WorkerEndpointID field missing")
+	}
+	field.SetString(endpointID)
+}
+
+func getAgentWorkerEndpointID(t *testing.T, agent *store.AgentData) string {
+	t.Helper()
+	field := reflect.ValueOf(agent).Elem().FieldByName("WorkerEndpointID")
+	if !field.IsValid() {
+		t.Fatal("AgentData.WorkerEndpointID field missing")
+	}
+	return field.String()
+}
+
+func createSQLiteWorkerEndpoint(t *testing.T, db *sql.DB, ctx context.Context, name string) string {
+	t.Helper()
+	endpointID := uuid.New().String()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO worker_endpoint_profiles (id, tenant_id, name, runtime_kind, endpoint_url, auth_token)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, endpointID, store.MasterTenantID, name, "wails_desktop", "http://127.0.0.1:18790", "token"); err != nil {
+		t.Fatalf("insert worker endpoint error: %v", err)
+	}
+	return endpointID
 }
 
 func getSQLiteAgentTestDB(t *testing.T, store *SQLiteAgentStore) *sql.DB {

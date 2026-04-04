@@ -101,9 +101,9 @@
     "localRuntimeKind": "Runtime Kind",
     "localRuntimeKindPlaceholder": "e.g. docker, wails_desktop",
     "localRuntimeKindHint": "Plain runtime identifier for the local worker backend.",
-    "boundWorkerId": "Bound Worker ID",
-    "boundWorkerIdPlaceholder": "worker-123",
-    "boundWorkerIdHint": "Exact local worker ID this agent should use.",
+    "workerEndpoint": "Worker Endpoint",
+    "workerEndpointPlaceholder": "Select a worker endpoint",
+    "workerEndpointHint": "Choose the saved worker endpoint profile this agent should use.",
     "cancel": "Cancel",
     "create": "Create",
     "creating": "Creating...",
@@ -436,9 +436,46 @@
     "runtimeKindLabel": "Runtime Kind",
     "runtimeKindPlaceholder": "e.g. docker, wails_desktop",
     "runtimeKindHint": "Plain runtime identifier for the local worker backend.",
-    "boundWorkerIdLabel": "Bound Worker ID",
-    "boundWorkerIdPlaceholder": "worker-123",
-    "boundWorkerIdHint": "Exact local worker ID this agent should use."
+    "workerEndpointLabel": "Worker Endpoint",
+    "workerEndpointPlaceholder": "Select a worker endpoint",
+    "workerEndpointHint": "Choose the saved worker endpoint profile this agent should use."
+  },
+  "workerEndpoints": {
+    "title": "Worker Endpoints",
+    "description": "Manage saved outbound worker endpoint profiles for local-worker agents.",
+    "add": "Add Endpoint",
+    "emptyTitle": "No worker endpoints yet",
+    "emptyDescription": "Create a worker endpoint profile before assigning local-worker agents.",
+    "tokenMasked": "Saved",
+    "columns": {
+      "name": "Name",
+      "runtime": "Runtime",
+      "url": "Endpoint URL",
+      "token": "Auth Token"
+    },
+    "form": {
+      "createTitle": "Create Worker Endpoint",
+      "editTitle": "Edit Worker Endpoint",
+      "name": "Name",
+      "runtimeKind": "Runtime Kind",
+      "endpointUrl": "Endpoint URL",
+      "authToken": "Auth Token",
+      "required": "All fields are required.",
+      "failed": "Failed to save worker endpoint"
+    },
+    "delete": {
+      "title": "Delete Worker Endpoint",
+      "description": "Delete \"{{name}}\"? Agents using it will need a different endpoint.",
+      "confirm": "Delete"
+    },
+    "toast": {
+      "created": "Worker endpoint created",
+      "createFailed": "Failed to create worker endpoint",
+      "updated": "Worker endpoint updated",
+      "updateFailed": "Failed to update worker endpoint",
+      "deleted": "Worker endpoint deleted",
+      "deleteFailed": "Failed to delete worker endpoint"
+    }
   },
   "workspace": {
     "title": "Workspace",

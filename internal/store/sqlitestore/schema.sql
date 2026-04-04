@@ -1,4 +1,4 @@
--- GoClaw SQLite Schema (auto-translated from PG migrations 000001-000036)
+-- GoClaw SQLite Schema (auto-translated from PG migrations 000001-000037)
 --
 -- Translation rules applied:
 --   UUID          → TEXT (36-char string)
@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS agents (
     execution_mode        VARCHAR(32) NOT NULL DEFAULT 'server',
     local_runtime_kind    TEXT,
     bound_worker_id       TEXT,
+    worker_endpoint_id    TEXT REFERENCES worker_endpoint_profiles(id) ON DELETE SET NULL,
     frontmatter           TEXT,
     budget_monthly_cents  INTEGER,
     tenant_id             TEXT NOT NULL REFERENCES tenants(id),
@@ -137,6 +138,7 @@ CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status) WHERE deleted_at 
 CREATE INDEX IF NOT EXISTS idx_agents_tenant ON agents(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_agents_tenant_active ON agents(tenant_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_agents_tenant_bound_worker ON agents(tenant_id, bound_worker_id) WHERE bound_worker_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agents_tenant_worker_endpoint ON agents(tenant_id, worker_endpoint_id) WHERE worker_endpoint_id IS NOT NULL;
 
 -- ============================================================
 -- Table: agent_shares
@@ -1317,6 +1319,24 @@ CREATE TABLE IF NOT EXISTS system_configs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_system_configs_tenant ON system_configs(tenant_id);
+
+-- ============================================================
+-- Table: worker_endpoint_profiles
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS worker_endpoint_profiles (
+    id           TEXT PRIMARY KEY,
+    tenant_id    TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    runtime_kind TEXT NOT NULL,
+    endpoint_url TEXT NOT NULL,
+    auth_token   TEXT NOT NULL,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(tenant_id, name)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_worker_endpoint_profiles_tenant_name ON worker_endpoint_profiles(tenant_id, name);
 
 -- ============================================================
 -- Table: local_workers

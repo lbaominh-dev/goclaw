@@ -395,6 +395,9 @@ func (s *Server) SetWakeHandler(h *httpapi.WakeHandler) { s.handlers = append(s.
 
 // SetMCPHandler sets the MCP server management handler.
 func (s *Server) SetMCPHandler(h *httpapi.MCPHandler) { s.handlers = append(s.handlers, h) }
+func (s *Server) SetWorkerEndpointsHandler(h *httpapi.WorkerEndpointsHandler) {
+	s.handlers = append(s.handlers, h)
+}
 func (s *Server) SetMCPUserCredentialsHandler(h *httpapi.MCPUserCredentialsHandler) {
 	s.handlers = append(s.handlers, h)
 }

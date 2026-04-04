@@ -39,6 +39,7 @@ func (m *AgentsMethods) handleCreate(ctx context.Context, client *gateway.Client
 		ExecutionMode     json.RawMessage `json:"execution_mode"`
 		LocalRuntimeKind  json.RawMessage `json:"local_runtime_kind"`
 		BoundWorkerID     json.RawMessage `json:"bound_worker_id"`
+		WorkerEndpointID  json.RawMessage `json:"worker_endpoint_id"`
 		// Per-agent config overrides
 		ToolsConfig      json.RawMessage `json:"tools_config,omitempty"`
 		SubagentsConfig  json.RawMessage `json:"subagents_config,omitempty"`
@@ -139,9 +140,20 @@ func (m *AgentsMethods) handleCreate(ctx context.Context, client *gateway.Client
 				return
 			}
 		}
+		var workerEndpointID string
+		if len(params.WorkerEndpointID) > 0 {
+			if err := json.Unmarshal(params.WorkerEndpointID, &workerEndpointID); err != nil {
+				client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, "worker_endpoint_id must be a string"))
+				return
+			}
+		}
 
 		executionMode = store.NormalizeAgentExecutionMode(executionMode)
-		if err := store.ValidateAgentExecutionSettings(executionMode, localRuntimeKind, boundWorkerID); err != nil {
+		if err := store.ValidateWorkerEndpointID(workerEndpointID); err != nil {
+			client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, err.Error()))
+			return
+		}
+		if err := store.ValidateAgentExecutionSettings(executionMode, localRuntimeKind, boundWorkerID, workerEndpointID); err != nil {
 			client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, err.Error()))
 			return
 		}
@@ -158,6 +170,7 @@ func (m *AgentsMethods) handleCreate(ctx context.Context, client *gateway.Client
 			ExecutionMode:      executionMode,
 			LocalRuntimeKind:   localRuntimeKind,
 			BoundWorkerID:      boundWorkerID,
+			WorkerEndpointID:   workerEndpointID,
 			ContextWindow:      params.ContextWindow,
 			MaxToolIterations:  params.MaxToolIterations,
 			BudgetMonthlyCents: params.BudgetCents,

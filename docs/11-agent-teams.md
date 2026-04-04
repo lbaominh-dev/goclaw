@@ -121,7 +121,7 @@ Members get a simpler version:
 Member agents can now run in two execution modes:
 
 - `server`: GoClaw executes the member run through the normal provider-backed agent loop
-- `local_worker`: GoClaw keeps the same team/task orchestration, but dispatches the member run to a bound local worker connected over WebSocket
+- `local_worker`: GoClaw keeps the same team/task orchestration, but dispatches the member run to a configured worker endpoint profile
 
 From the lead's point of view, a local-backed member is still just a normal team member:
 
@@ -133,9 +133,9 @@ The difference is only the execution backend. A local-backed member requires:
 
 - `execution_mode = local_worker`
 - a fixed `local_runtime_kind` such as `claude_cli` or `opencode`
-- a fixed `bound_worker_id`
+- a bound `worker_endpoint_id`
 
-If the bound worker is offline when the run starts, the delegated member run fails fast instead of falling back to server execution.
+In this model, GoClaw connects outward to a worker server running on the local machine using a stored WebSocket endpoint profile and auth token. If the endpoint is unreachable or auth is rejected when the run starts, the delegated member run fails fast instead of falling back to server execution.
 
 ---
 

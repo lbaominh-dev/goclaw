@@ -15,7 +15,7 @@ var schemaSQL string
 
 // SchemaVersion is the current SQLite schema version.
 // Bump this when adding new migration steps below.
-const SchemaVersion = 6
+const SchemaVersion = 8
 
 // migrations maps version → SQL to apply when upgrading FROM that version.
 // schema.sql always represents the LATEST full schema (for fresh DBs).
@@ -79,6 +79,82 @@ CREATE UNIQUE INDEX idx_channel_contacts_tenant_type_sender
 CREATE INDEX IF NOT EXISTS idx_subagent_tasks_parent_status ON subagent_tasks(tenant_id, parent_agent_key, status);
 CREATE INDEX IF NOT EXISTS idx_subagent_tasks_session ON subagent_tasks(session_key);
 CREATE INDEX IF NOT EXISTS idx_subagent_tasks_created ON subagent_tasks(tenant_id, created_at);`,
+	6: `CREATE TABLE IF NOT EXISTS worker_endpoint_profiles (
+    id           TEXT PRIMARY KEY,
+    tenant_id    TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    runtime_kind TEXT NOT NULL,
+    endpoint_url TEXT NOT NULL,
+    auth_token   TEXT NOT NULL,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(tenant_id, name)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_worker_endpoint_profiles_tenant_name ON worker_endpoint_profiles(tenant_id, name);
+ALTER TABLE agents ADD COLUMN worker_endpoint_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_agents_tenant_worker_endpoint ON agents(tenant_id, worker_endpoint_id) WHERE worker_endpoint_id IS NOT NULL;`,
+	7: `DROP INDEX IF EXISTS idx_agents_tenant_agent_key_active;
+DROP INDEX IF EXISTS idx_agents_owner;
+DROP INDEX IF EXISTS idx_agents_status;
+DROP INDEX IF EXISTS idx_agents_tenant;
+DROP INDEX IF EXISTS idx_agents_tenant_active;
+DROP INDEX IF EXISTS idx_agents_tenant_bound_worker;
+DROP INDEX IF EXISTS idx_agents_tenant_worker_endpoint;
+ALTER TABLE agents RENAME TO agents__old;
+CREATE TABLE agents (
+    id                    TEXT NOT NULL PRIMARY KEY,
+    agent_key             VARCHAR(100) NOT NULL,
+    display_name          VARCHAR(255),
+    owner_id              VARCHAR(255) NOT NULL,
+    provider              VARCHAR(50) NOT NULL DEFAULT 'openrouter',
+    model                 VARCHAR(200) NOT NULL,
+    context_window        INT NOT NULL DEFAULT 200000,
+    max_tool_iterations   INT NOT NULL DEFAULT 20,
+    workspace             TEXT NOT NULL DEFAULT '.',
+    restrict_to_workspace BOOLEAN NOT NULL DEFAULT 1,
+    tools_config          TEXT NOT NULL DEFAULT '{}',
+    sandbox_config        TEXT,
+    subagents_config      TEXT,
+    memory_config         TEXT,
+    compaction_config     TEXT,
+    context_pruning       TEXT,
+    other_config          TEXT NOT NULL DEFAULT '{}',
+    is_default            BOOLEAN NOT NULL DEFAULT 0,
+    agent_type            VARCHAR(20) NOT NULL DEFAULT 'open',
+    status                VARCHAR(20) DEFAULT 'active',
+    execution_mode        VARCHAR(32) NOT NULL DEFAULT 'server',
+    local_runtime_kind    TEXT,
+    bound_worker_id       TEXT,
+    worker_endpoint_id    TEXT REFERENCES worker_endpoint_profiles(id) ON DELETE SET NULL,
+    frontmatter           TEXT,
+    budget_monthly_cents  INTEGER,
+    tenant_id             TEXT NOT NULL REFERENCES tenants(id),
+    created_at            TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at            TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    deleted_at            TEXT
+);
+INSERT INTO agents (
+    id, agent_key, display_name, owner_id, provider, model, context_window, max_tool_iterations,
+    workspace, restrict_to_workspace, tools_config, sandbox_config, subagents_config, memory_config,
+    compaction_config, context_pruning, other_config, is_default, agent_type, status, execution_mode,
+    local_runtime_kind, bound_worker_id, worker_endpoint_id, frontmatter, budget_monthly_cents,
+    tenant_id, created_at, updated_at, deleted_at
+)
+SELECT
+    id, agent_key, display_name, owner_id, provider, model, context_window, max_tool_iterations,
+    workspace, restrict_to_workspace, tools_config, sandbox_config, subagents_config, memory_config,
+    compaction_config, context_pruning, other_config, is_default, agent_type, status, execution_mode,
+    local_runtime_kind, bound_worker_id, worker_endpoint_id, frontmatter, budget_monthly_cents,
+    tenant_id, created_at, updated_at, deleted_at
+FROM agents__old;
+DROP TABLE agents__old;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_tenant_agent_key_active ON agents(tenant_id, agent_key) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_agents_owner ON agents(owner_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_agents_tenant ON agents(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_agents_tenant_active ON agents(tenant_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_agents_tenant_bound_worker ON agents(tenant_id, bound_worker_id) WHERE bound_worker_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agents_tenant_worker_endpoint ON agents(tenant_id, worker_endpoint_id) WHERE worker_endpoint_id IS NOT NULL;`,
 }
 
 // EnsureSchema creates tables if they don't exist and applies incremental migrations.

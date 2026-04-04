@@ -33,14 +33,15 @@ const agentSelectCols = `id, agent_key, display_name, frontmatter, owner_id, pro
 	 context_window, max_tool_iterations, workspace, restrict_to_workspace,
 	 tools_config, sandbox_config, subagents_config, memory_config,
 	 compaction_config, context_pruning, other_config,
-	 agent_type, is_default, status, execution_mode, local_runtime_kind, bound_worker_id,
+	 agent_type, is_default, status, execution_mode, local_runtime_kind, bound_worker_id, worker_endpoint_id,
 	 budget_monthly_cents, created_at, updated_at, tenant_id`
 
 func (s *SQLiteAgentStore) Create(ctx context.Context, agent *store.AgentData) error {
 	agent.ExecutionMode = store.NormalizeAgentExecutionMode(agent.ExecutionMode)
 	agent.LocalRuntimeKind = strings.TrimSpace(agent.LocalRuntimeKind)
 	agent.BoundWorkerID = strings.TrimSpace(agent.BoundWorkerID)
-	if err := store.ValidateAgentExecutionSettings(agent.ExecutionMode, agent.LocalRuntimeKind, agent.BoundWorkerID); err != nil {
+	agent.WorkerEndpointID = strings.TrimSpace(agent.WorkerEndpointID)
+	if err := store.ValidateAgentExecutionSettings(agent.ExecutionMode, agent.LocalRuntimeKind, agent.BoundWorkerID, agent.WorkerEndpointID); err != nil {
 		return err
 	}
 	if agent.ID == uuid.Nil {
@@ -58,9 +59,9 @@ func (s *SQLiteAgentStore) Create(ctx context.Context, agent *store.AgentData) e
 		 context_window, max_tool_iterations, workspace, restrict_to_workspace,
 		 tools_config, sandbox_config, subagents_config, memory_config,
 		 compaction_config, context_pruning, other_config,
-		 agent_type, is_default, status, execution_mode, local_runtime_kind, bound_worker_id,
+		 agent_type, is_default, status, execution_mode, local_runtime_kind, bound_worker_id, worker_endpoint_id,
 		 budget_monthly_cents, created_at, updated_at, tenant_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		agent.ID, agent.AgentKey,
 		agent.DisplayName,
 		sql.NullString{String: agent.Frontmatter, Valid: agent.Frontmatter != ""},
@@ -71,6 +72,7 @@ func (s *SQLiteAgentStore) Create(ctx context.Context, agent *store.AgentData) e
 		agent.AgentType, agent.IsDefault, agent.Status, agent.ExecutionMode,
 		sql.NullString{String: agent.LocalRuntimeKind, Valid: agent.LocalRuntimeKind != ""},
 		sql.NullString{String: agent.BoundWorkerID, Valid: agent.BoundWorkerID != ""},
+		sql.NullString{String: agent.WorkerEndpointID, Valid: agent.WorkerEndpointID != ""},
 		agent.BudgetMonthlyCents,
 		now, now, tenantID,
 	)
@@ -132,12 +134,13 @@ func (s *SQLiteAgentStore) Update(ctx context.Context, id uuid.UUID, updates map
 	if len(updates) == 0 {
 		return nil
 	}
-	if mode, localRuntimeKind, boundWorkerID, relevant, err := s.resolveExecutionSettingsUpdate(ctx, id, updates); err != nil {
+	if mode, localRuntimeKind, boundWorkerID, workerEndpointID, relevant, err := s.resolveExecutionSettingsUpdate(ctx, id, updates); err != nil {
 		return err
 	} else if relevant {
 		updates["execution_mode"] = mode
 		updates["local_runtime_kind"] = store.NullableStringUpdateArg(localRuntimeKind)
 		updates["bound_worker_id"] = store.NullableStringUpdateArg(boundWorkerID)
+		updates["worker_endpoint_id"] = store.NullableStringUpdateArg(workerEndpointID)
 	}
 
 	// Unset existing default before setting a new one (scoped to same tenant).
@@ -172,16 +175,16 @@ func (s *SQLiteAgentStore) Update(ctx context.Context, id uuid.UUID, updates map
 	return execMapUpdateWhereTenant(ctx, s.db, "agents", updates, id, tid)
 }
 
-func (s *SQLiteAgentStore) resolveExecutionSettingsUpdate(ctx context.Context, id uuid.UUID, updates map[string]any) (string, *string, *string, bool, error) {
+func (s *SQLiteAgentStore) resolveExecutionSettingsUpdate(ctx context.Context, id uuid.UUID, updates map[string]any) (string, *string, *string, *string, bool, error) {
 	if !store.HasExecutionSettingsUpdate(updates) {
-		return "", nil, nil, false, nil
+		return "", nil, nil, nil, false, nil
 	}
 	current, err := s.GetByID(ctx, id)
 	if err != nil {
 		if isSoftDeletedSQLiteAgent(ctx, s.db, id) {
-			return "", nil, nil, false, nil
+			return "", nil, nil, nil, false, nil
 		}
-		return "", nil, nil, false, err
+		return "", nil, nil, nil, false, err
 	}
 	return store.ResolveUpdatedAgentExecutionSettings(*current, updates)
 }
@@ -270,14 +273,14 @@ type agentRowScanner interface {
 
 func scanAgentRow(row agentRowScanner) (*store.AgentData, error) {
 	var d store.AgentData
-	var frontmatter, executionMode, localRuntimeKind, boundWorkerID sql.NullString
+	var frontmatter, executionMode, localRuntimeKind, boundWorkerID, workerEndpointID sql.NullString
 	var toolsCfg, sandboxCfg, subagentsCfg, memoryCfg, compactionCfg, pruningCfg, otherCfg *[]byte
 	createdAt, updatedAt := scanTimePair()
 	err := row.Scan(
 		&d.ID, &d.AgentKey, &d.DisplayName, &frontmatter, &d.OwnerID, &d.Provider, &d.Model,
 		&d.ContextWindow, &d.MaxToolIterations, &d.Workspace, &d.RestrictToWorkspace,
 		&toolsCfg, &sandboxCfg, &subagentsCfg, &memoryCfg, &compactionCfg, &pruningCfg, &otherCfg,
-		&d.AgentType, &d.IsDefault, &d.Status, &executionMode, &localRuntimeKind, &boundWorkerID, &d.BudgetMonthlyCents,
+		&d.AgentType, &d.IsDefault, &d.Status, &executionMode, &localRuntimeKind, &boundWorkerID, &workerEndpointID, &d.BudgetMonthlyCents,
 		createdAt, updatedAt, &d.TenantID,
 	)
 	if err != nil {
@@ -294,6 +297,9 @@ func scanAgentRow(row agentRowScanner) (*store.AgentData, error) {
 	}
 	if boundWorkerID.Valid {
 		d.BoundWorkerID = boundWorkerID.String
+	}
+	if workerEndpointID.Valid {
+		d.WorkerEndpointID = workerEndpointID.String
 	}
 	if toolsCfg != nil {
 		d.ToolsConfig = *toolsCfg

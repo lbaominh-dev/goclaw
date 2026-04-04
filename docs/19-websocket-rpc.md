@@ -235,91 +235,13 @@ Delete an agent (admin only).
 
 ## 4. Local Workers
 
-Local workers are authenticated WebSocket clients that execute local-backed member agents on a bound machine.
+Local workers are modeled as outbound worker endpoint profiles. GoClaw stores the worker endpoint URL and auth token, then connects outward to a worker server running on the local machine.
 
-### `workers.register`
+The worker-server wire contract is documented in:
 
-Register the current authenticated WebSocket connection as a live local worker for its tenant.
+- `docs/superpowers/specs/2026-04-03-worker-endpoint-protocol.md`
 
-**Request:**
-
-```json
-{
-  "workerId": "worker-mbp-01",
-  "runtimeKind": "claude_cli",
-  "displayName": "Minh MacBook"
-}
-```
-
-**Response:**
-
-```json
-{
-  "workerId": "worker-mbp-01",
-  "status": "online"
-}
-```
-
-### `workers.job.started`
-
-Worker acknowledges that a queued job has started running locally.
-
-**Request:** `{jobId}`
-
-### `workers.job.output`
-
-Worker sends observational output/progress text for a job.
-
-**Request:**
-
-```json
-{
-  "jobId": "uuid",
-  "output": {"line": "running tests..."}
-}
-```
-
-This output is treated as observational progress only. The server does not execute or interpret tool calls embedded in worker output.
-
-### `workers.job.status`
-
-Worker sends a structured status/progress update for a job.
-
-**Request:**
-
-```json
-{
-  "jobId": "uuid",
-  "status": "running_tests",
-  "detail": {"percent": 60, "message": "unit tests in progress"}
-}
-```
-
-### `workers.job.completed`
-
-Worker reports successful job completion.
-
-**Request:**
-
-```json
-{
-  "jobId": "uuid",
-  "result": {"summary": "implemented change and tests pass"}
-}
-```
-
-### `workers.job.failed`
-
-Worker reports terminal job failure.
-
-**Request:**
-
-```json
-{
-  "jobId": "uuid",
-  "error": {"message": "test suite failed", "code": "EFAIL"}
-}
-```
+At the WebSocket RPC layer, local-worker execution no longer relies on dashboard clients calling `workers.register` as the primary model. The worker lifecycle is now driven by outbound endpoint profile configuration and agent binding via `worker_endpoint_id`.
 
 ---
 

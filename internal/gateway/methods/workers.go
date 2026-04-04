@@ -106,7 +106,7 @@ func (m *WorkersMethods) handleJobStarted(ctx context.Context, client *gateway.C
 	if !ok {
 		return
 	}
-	if err := m.workers.MarkJobRunning(store.WithTenantID(ctx, client.TenantID()), jobID); err != nil {
+	if err := m.handleWorkerJobStarted(store.WithTenantID(ctx, client.TenantID()), jobID); err != nil {
 		client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInternal, err.Error()))
 		return
 	}
@@ -125,19 +125,9 @@ func (m *WorkersMethods) handleJobOutput(ctx context.Context, client *gateway.Cl
 	if !decodeWorkerParams(req, client, &params) {
 		return
 	}
-	if task, err := m.loadLinkedTask(ctx, client, job); err != nil {
+	if err := m.handleWorkerJobOutput(store.WithTenantID(ctx, client.TenantID()), job, params.Output); err != nil {
 		client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInternal, err.Error()))
 		return
-	} else if task != nil {
-		step := describeWorkerPayload(params.Output)
-		m.broadcastLinkedTaskEvent(client.TenantID(), protocol.EventTeamTaskProgress, task,
-			tools.BuildTaskEventPayload(
-				task.TeamID.String(), task.ID.String(),
-				store.TeamTaskStatusInProgress,
-				"system", job.WorkerID,
-				append(m.taskEventOptions(task), tools.WithProgress(0, step))...,
-			),
-		)
 	}
 	client.SendResponse(protocol.NewOKResponse(req.ID, map[string]any{"jobId": jobID.String(), "accepted": true}))
 }
@@ -164,28 +154,9 @@ func (m *WorkersMethods) handleJobStatus(ctx context.Context, client *gateway.Cl
 	if len(result) == 0 {
 		result = []byte("{}")
 	}
-	if err := m.workers.UpdateJobStatus(store.WithTenantID(ctx, client.TenantID()), jobID, status, result); err != nil {
+	if err := m.handleWorkerJobStatus(store.WithTenantID(ctx, client.TenantID()), job, status, result); err != nil {
 		client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInternal, err.Error()))
 		return
-	}
-	if task, err := m.loadLinkedTask(ctx, client, job); err != nil {
-		client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInternal, err.Error()))
-		return
-	} else if task != nil {
-		percent := workerProgressPercent(params.Detail, task.ProgressPercent)
-		step := workerProgressStep(status, params.Detail)
-		if err := m.teams.UpdateTaskProgress(store.WithTenantID(ctx, client.TenantID()), task.ID, task.TeamID, percent, step); err != nil {
-			client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInternal, err.Error()))
-			return
-		}
-		m.broadcastLinkedTaskEvent(client.TenantID(), protocol.EventTeamTaskProgress, task,
-			tools.BuildTaskEventPayload(
-				task.TeamID.String(), task.ID.String(),
-				store.TeamTaskStatusInProgress,
-				"system", job.WorkerID,
-				append(m.taskEventOptions(task), tools.WithProgress(percent, step))...,
-			),
-		)
 	}
 	client.SendResponse(protocol.NewOKResponse(req.ID, map[string]any{"jobId": jobID.String(), "status": status}))
 }
@@ -206,28 +177,9 @@ func (m *WorkersMethods) handleJobCompleted(ctx context.Context, client *gateway
 	if len(result) == 0 {
 		result = []byte("{}")
 	}
-	if err := m.workers.MarkJobCompleted(store.WithTenantID(ctx, client.TenantID()), jobID, result); err != nil {
+	if err := m.handleWorkerJobCompleted(store.WithTenantID(ctx, client.TenantID()), job, result); err != nil {
 		client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInternal, err.Error()))
 		return
-	}
-	if task, err := m.loadLinkedTask(ctx, client, job); err != nil {
-		client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInternal, err.Error()))
-		return
-	} else if task != nil {
-		resultText := describeWorkerPayload(result)
-		if err := m.teams.CompleteTask(store.WithTenantID(ctx, client.TenantID()), task.ID, task.TeamID, resultText); err != nil {
-			client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInternal, err.Error()))
-			return
-		}
-		m.broadcastLinkedTaskEvent(client.TenantID(), protocol.EventTeamTaskCompleted, task,
-			tools.BuildTaskEventPayload(
-				task.TeamID.String(), task.ID.String(),
-				store.TeamTaskStatusCompleted,
-				"system", job.WorkerID,
-				m.taskEventOptions(task)...,
-			),
-		)
-		m.dispatchLinkedTaskDependents(ctx, task.TeamID)
 	}
 	client.SendResponse(protocol.NewOKResponse(req.ID, map[string]any{"jobId": jobID.String(), "status": store.WorkerJobStatusCompleted}))
 }
@@ -248,37 +200,162 @@ func (m *WorkersMethods) handleJobFailed(ctx context.Context, client *gateway.Cl
 	if len(result) == 0 {
 		result = []byte("{}")
 	}
-	if err := m.workers.UpdateJobStatus(store.WithTenantID(ctx, client.TenantID()), jobID, store.WorkerJobStatusFailed, result); err != nil {
+	if err := m.handleWorkerJobFailed(store.WithTenantID(ctx, client.TenantID()), job, result); err != nil {
 		client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInternal, err.Error()))
 		return
-	}
-	if task, err := m.loadLinkedTask(ctx, client, job); err != nil {
-		client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInternal, err.Error()))
-		return
-	} else if task != nil {
-		reason := describeWorkerPayload(result)
-		if err := m.teams.FailTask(store.WithTenantID(ctx, client.TenantID()), task.ID, task.TeamID, reason); err != nil {
-			client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInternal, err.Error()))
-			return
-		}
-		m.broadcastLinkedTaskEvent(client.TenantID(), protocol.EventTeamTaskFailed, task,
-			tools.BuildTaskEventPayload(
-				task.TeamID.String(), task.ID.String(),
-				store.TeamTaskStatusFailed,
-				"system", job.WorkerID,
-				append(m.taskEventOptions(task), tools.WithReason(reason))...,
-			),
-		)
-		m.dispatchLinkedTaskDependents(ctx, task.TeamID)
 	}
 	client.SendResponse(protocol.NewOKResponse(req.ID, map[string]any{"jobId": jobID.String(), "status": store.WorkerJobStatusFailed}))
 }
 
-func (m *WorkersMethods) loadLinkedTask(ctx context.Context, client *gateway.Client, job *store.WorkerJobData) (*store.TeamTaskData, error) {
+func (m *WorkersMethods) HandleOutboundWorkerMessage(ctx context.Context, endpointID uuid.UUID, reply localworker.WorkerReplyEnvelope) error {
+	if m == nil || m.workers == nil {
+		return fmt.Errorf("worker gateway is not configured")
+	}
+	jobID, err := uuid.Parse(strings.TrimSpace(reply.JobID))
+	if err != nil {
+		return fmt.Errorf("jobId must be a valid UUID: %w", err)
+	}
+	ctx = store.WithTenantID(ctx, store.TenantIDFromContext(ctx))
+	job, err := m.workers.GetJob(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	if job == nil {
+		return fmt.Errorf("worker job not found: %s", jobID)
+	}
+	if job.TenantID != store.TenantIDFromContext(ctx) || job.WorkerID != endpointID.String() {
+		return fmt.Errorf("worker endpoint %s does not own job %s", endpointID, jobID)
+	}
+	switch strings.TrimSpace(reply.Type) {
+	case "job.started":
+		return m.handleWorkerJobStarted(ctx, jobID)
+	case "job.output":
+		return m.handleWorkerJobOutput(ctx, job, reply.Payload)
+	case "job.status":
+		status := strings.TrimSpace(reply.Status)
+		if status == "" {
+			return fmt.Errorf("status is required")
+		}
+		result := []byte(reply.Payload)
+		if len(result) == 0 {
+			result = []byte("{}")
+		}
+		return m.handleWorkerJobStatus(ctx, job, status, result)
+	case "job.completed":
+		result := []byte(reply.Payload)
+		if len(result) == 0 {
+			result = []byte("{}")
+		}
+		return m.handleWorkerJobCompleted(ctx, job, result)
+	case "job.failed":
+		result := []byte(reply.Error)
+		if len(result) == 0 {
+			result = []byte("{}")
+		}
+		return m.handleWorkerJobFailed(ctx, job, result)
+	default:
+		return nil
+	}
+}
+
+func (m *WorkersMethods) handleWorkerJobStarted(ctx context.Context, jobID uuid.UUID) error {
+	return m.workers.MarkJobRunning(ctx, jobID)
+}
+
+func (m *WorkersMethods) handleWorkerJobOutput(ctx context.Context, job *store.WorkerJobData, output json.RawMessage) error {
+	task, err := m.loadLinkedTaskByJob(ctx, job)
+	if err != nil || task == nil {
+		return err
+	}
+	step := describeWorkerPayload(output)
+	m.broadcastLinkedTaskEvent(store.TenantIDFromContext(ctx), protocol.EventTeamTaskProgress, task,
+		tools.BuildTaskEventPayload(
+			task.TeamID.String(), task.ID.String(),
+			store.TeamTaskStatusInProgress,
+			"system", job.WorkerID,
+			append(m.taskEventOptions(task), tools.WithProgress(0, step))...,
+		),
+	)
+	return nil
+}
+
+func (m *WorkersMethods) handleWorkerJobStatus(ctx context.Context, job *store.WorkerJobData, status string, result []byte) error {
+	if err := m.workers.UpdateJobStatus(ctx, job.ID, status, result); err != nil {
+		return err
+	}
+	task, err := m.loadLinkedTaskByJob(ctx, job)
+	if err != nil || task == nil {
+		return err
+	}
+	percent := workerProgressPercent(result, task.ProgressPercent)
+	step := workerProgressStep(status, result)
+	if err := m.teams.UpdateTaskProgress(ctx, task.ID, task.TeamID, percent, step); err != nil {
+		return err
+	}
+	m.broadcastLinkedTaskEvent(store.TenantIDFromContext(ctx), protocol.EventTeamTaskProgress, task,
+		tools.BuildTaskEventPayload(
+			task.TeamID.String(), task.ID.String(),
+			store.TeamTaskStatusInProgress,
+			"system", job.WorkerID,
+			append(m.taskEventOptions(task), tools.WithProgress(percent, step))...,
+		),
+	)
+	return nil
+}
+
+func (m *WorkersMethods) handleWorkerJobCompleted(ctx context.Context, job *store.WorkerJobData, result []byte) error {
+	if err := m.workers.MarkJobCompleted(ctx, job.ID, result); err != nil {
+		return err
+	}
+	task, err := m.loadLinkedTaskByJob(ctx, job)
+	if err != nil || task == nil {
+		return err
+	}
+	resultText := describeWorkerPayload(result)
+	if err := m.teams.CompleteTask(ctx, task.ID, task.TeamID, resultText); err != nil {
+		return err
+	}
+	m.broadcastLinkedTaskEvent(store.TenantIDFromContext(ctx), protocol.EventTeamTaskCompleted, task,
+		tools.BuildTaskEventPayload(
+			task.TeamID.String(), task.ID.String(),
+			store.TeamTaskStatusCompleted,
+			"system", job.WorkerID,
+			m.taskEventOptions(task)...,
+		),
+	)
+	m.dispatchLinkedTaskDependents(ctx, task.TeamID)
+	return nil
+}
+
+func (m *WorkersMethods) handleWorkerJobFailed(ctx context.Context, job *store.WorkerJobData, result []byte) error {
+	if err := m.workers.UpdateJobStatus(ctx, job.ID, store.WorkerJobStatusFailed, result); err != nil {
+		return err
+	}
+	task, err := m.loadLinkedTaskByJob(ctx, job)
+	if err != nil || task == nil {
+		return err
+	}
+	reason := describeWorkerPayload(result)
+	if err := m.teams.FailTask(ctx, task.ID, task.TeamID, reason); err != nil {
+		return err
+	}
+	m.broadcastLinkedTaskEvent(store.TenantIDFromContext(ctx), protocol.EventTeamTaskFailed, task,
+		tools.BuildTaskEventPayload(
+			task.TeamID.String(), task.ID.String(),
+			store.TeamTaskStatusFailed,
+			"system", job.WorkerID,
+			append(m.taskEventOptions(task), tools.WithReason(reason))...,
+		),
+	)
+	m.dispatchLinkedTaskDependents(ctx, task.TeamID)
+	return nil
+}
+
+func (m *WorkersMethods) loadLinkedTaskByJob(ctx context.Context, job *store.WorkerJobData) (*store.TeamTaskData, error) {
 	if m == nil || m.teams == nil || job == nil || job.TaskID == nil {
 		return nil, nil
 	}
-	task, err := m.teams.GetTask(store.WithTenantID(ctx, client.TenantID()), *job.TaskID)
+	task, err := m.teams.GetTask(ctx, *job.TaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -286,6 +363,10 @@ func (m *WorkersMethods) loadLinkedTask(ctx context.Context, client *gateway.Cli
 		return nil, nil
 	}
 	return task, nil
+}
+
+func (m *WorkersMethods) loadLinkedTask(ctx context.Context, client *gateway.Client, job *store.WorkerJobData) (*store.TeamTaskData, error) {
+	return m.loadLinkedTaskByJob(store.WithTenantID(ctx, client.TenantID()), job)
 }
 
 func (m *WorkersMethods) broadcastLinkedTaskEvent(tenantID uuid.UUID, name string, task *store.TeamTaskData, payload protocol.TeamTaskEventPayload) {

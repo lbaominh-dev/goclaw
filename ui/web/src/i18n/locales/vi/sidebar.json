@@ -30,6 +30,7 @@
     "logs": "Nhật ký",
     "storage": "Lưu trữ",
     "providers": "Provider",
+    "workerEndpoints": "Điểm cuối worker",
     "config": "Cấu hình",
     "approvals": "Phê duyệt",
     "importExport": "Import & Export",

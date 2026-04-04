@@ -36,7 +36,7 @@ var agentAllowedFields = map[string]bool{
 	"provider": true, "model": true, "status": true,
 	"context_window": true, "max_tool_iterations": true,
 	"workspace":      true,
-	"execution_mode": true, "local_runtime_kind": true, "bound_worker_id": true,
+	"execution_mode": true, "local_runtime_kind": true, "bound_worker_id": true, "worker_endpoint_id": true,
 	"frontmatter": true, "compaction_config": true,
 	"memory_config": true, "other_config": true, "tools_config": true,
 	"sandbox_config": true, "context_pruning": true,
@@ -69,4 +69,11 @@ var channelInstanceAllowedFields = map[string]bool{
 	"enabled": true, "group_policy": true, "allow_from": true,
 	"metadata": true, "webhook_secret": true, "config": true,
 	"display_name": true,
+}
+
+var workerEndpointAllowedFields = map[string]bool{
+	"name":         true,
+	"runtime_kind": true,
+	"endpoint_url": true,
+	"auth_token":   true,
 }

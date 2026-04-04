@@ -50,6 +50,7 @@ func wireExtras(
 	injectionAction string,
 	appCfg *config.Config,
 	sandboxMgr sandbox.Manager,
+	outboundManager *localworker.OutboundManager,
 	workerManager *localworker.Manager,
 	redisClient any, // nil when built without -tags redis or when Redis is unconfigured
 ) (*tools.ContextFileInterceptor, *mcpbridge.Pool, *media.Store, tools.PostTurnProcessor) {
@@ -130,7 +131,7 @@ func wireExtras(
 	if sas, ok := stores.Skills.(store.SkillAccessStore); ok {
 		skillAccessStore = sas
 	}
-	localWorkerDispatcher := localworker.NewDispatcher(stores.Workers, workerManager)
+	localWorkerDispatcher := localworker.NewDispatcher(stores.Workers, outboundManager)
 
 	resolver := agent.NewManagedResolver(agent.ResolverDeps{
 		AgentStore:             stores.Agents,

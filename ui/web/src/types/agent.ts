@@ -104,6 +104,24 @@ export interface ChatGPTOAuthRoutingConfig {
 
 export type AgentExecutionMode = "server" | "local_worker";
 
+export interface WorkerEndpointData {
+  id: string;
+  tenant_id: string;
+  name: string;
+  runtime_kind: string;
+  endpoint_url: string;
+  auth_token: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface WorkerEndpointInput {
+  name: string;
+  runtime_kind: string;
+  endpoint_url: string;
+  auth_token: string;
+}
+
 export interface AgentData {
   id: string;
   agent_key: string;
@@ -122,6 +140,7 @@ export interface AgentData {
   execution_mode?: AgentExecutionMode;
   local_runtime_kind?: string;
   bound_worker_id?: string;
+  worker_endpoint_id?: string;
   created_at?: string;
   updated_at?: string;
 

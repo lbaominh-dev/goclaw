@@ -264,7 +264,7 @@ func TestHandleCreate_MultipleOwnerIDs_UsesFirst(t *testing.T) {
 	}
 }
 
-func TestHandleCreate_AllowsLocalWorkerMember(t *testing.T) {
+func TestHandleCreate_AllowsLocalWorkerEndpointBinding(t *testing.T) {
 	stub := &createCaptureStore{}
 	m := newManagedMethods(t, stub)
 
@@ -272,6 +272,7 @@ func TestHandleCreate_AllowsLocalWorkerMember(t *testing.T) {
 		"name":               "Local Worker Agent",
 		"execution_mode":     store.AgentExecutionModeLocalWorker,
 		"local_runtime_kind": "docker",
+		"worker_endpoint_id": uuid.NewString(),
 		"bound_worker_id":    "worker-123",
 	})
 
@@ -285,6 +286,13 @@ func TestHandleCreate_AllowsLocalWorkerMember(t *testing.T) {
 	}
 	if stub.created.LocalRuntimeKind != "docker" {
 		t.Fatalf("LocalRuntimeKind = %q, want %q", stub.created.LocalRuntimeKind, "docker")
+	}
+	field := reflect.ValueOf(stub.created).Elem().FieldByName("WorkerEndpointID")
+	if !field.IsValid() {
+		t.Fatal("AgentData.WorkerEndpointID field missing")
+	}
+	if got := field.String(); got == "" {
+		t.Fatal("WorkerEndpointID should be set")
 	}
 	if stub.created.BoundWorkerID != "worker-123" {
 		t.Fatalf("BoundWorkerID = %q, want %q", stub.created.BoundWorkerID, "worker-123")
@@ -318,7 +326,7 @@ func TestHandleCreate_RejectsInvalidLocalWorkerConfig(t *testing.T) {
 	if resp.Error.Code != protocol.ErrInvalidRequest {
 		t.Fatalf("error code = %q, want %q", resp.Error.Code, protocol.ErrInvalidRequest)
 	}
-	if !strings.Contains(resp.Error.Message, "local_runtime_kind and bound_worker_id") {
+	if !strings.Contains(resp.Error.Message, "local_runtime_kind and worker_endpoint_id") {
 		t.Fatalf("error message = %q, want local worker validation failure", resp.Error.Message)
 	}
 }
@@ -332,7 +340,7 @@ func TestHandleCreate_RejectsMalformedLocalWorkerConfig(t *testing.T) {
 		"name":               "Malformed Local Worker Agent",
 		"execution_mode":     123,
 		"local_runtime_kind": "docker",
-		"bound_worker_id":    "worker-123",
+		"worker_endpoint_id": "endpoint-123",
 	})
 
 	m.handleCreate(context.Background(), client, req)
@@ -353,5 +361,38 @@ func TestHandleCreate_RejectsMalformedLocalWorkerConfig(t *testing.T) {
 	}
 	if !strings.Contains(resp.Error.Message, "execution_mode") {
 		t.Fatalf("error message = %q, want malformed execution_mode failure", resp.Error.Message)
+	}
+}
+
+func TestHandleCreate_RejectsMalformedWorkerEndpointID(t *testing.T) {
+	stub := &createCaptureStore{}
+	m := newManagedMethods(t, stub)
+	client := responseClient()
+
+	req := buildCreateRequest(t, map[string]any{
+		"name":               "Bad Endpoint Agent",
+		"execution_mode":     store.AgentExecutionModeLocalWorker,
+		"local_runtime_kind": "docker",
+		"worker_endpoint_id": "not-a-uuid",
+	})
+
+	m.handleCreate(context.Background(), client, req)
+
+	if stub.created != nil {
+		t.Fatal("agentStore.Create should not be called for malformed worker endpoint id")
+	}
+
+	resp := readResponse(t, client)
+	if resp.OK {
+		t.Fatal("expected error response for malformed worker endpoint id")
+	}
+	if resp.Error == nil {
+		t.Fatal("expected error details in response")
+	}
+	if resp.Error.Code != protocol.ErrInvalidRequest {
+		t.Fatalf("error code = %q, want %q", resp.Error.Code, protocol.ErrInvalidRequest)
+	}
+	if !strings.Contains(resp.Error.Message, "worker_endpoint_id") {
+		t.Fatalf("error message = %q, want worker_endpoint_id validation failure", resp.Error.Message)
 	}
 }

@@ -20,7 +20,7 @@ const (
 // DispatchJobInput contains the minimal persisted context needed for local worker execution.
 type DispatchJobInput struct {
 	TenantID          uuid.UUID         `json:"tenantId"`
-	WorkerID          string            `json:"workerId"`
+	WorkerEndpointID  string            `json:"workerEndpointId"`
 	RuntimeKind       string            `json:"runtimeKind"`
 	AgentID           uuid.UUID         `json:"agentId"`
 	AgentKey          string            `json:"agentKey"`
@@ -56,28 +56,29 @@ type DispatchJobInput struct {
 }
 
 type Dispatcher struct {
-	manager *Manager
-	workers store.WorkerStore
+	outbound *OutboundManager
+	workers  store.WorkerStore
 }
 
-func NewDispatcher(workers store.WorkerStore, manager *Manager) *Dispatcher {
-	if workers == nil || manager == nil {
+func NewDispatcher(workers store.WorkerStore, outbound *OutboundManager) *Dispatcher {
+	if workers == nil || outbound == nil {
 		return nil
 	}
-	return &Dispatcher{workers: workers, manager: manager}
+	return &Dispatcher{workers: workers, outbound: outbound}
 }
 
 func (d *Dispatcher) DispatchRun(ctx context.Context, input DispatchJobInput) (*store.WorkerJobData, error) {
-	if d == nil || d.workers == nil || d.manager == nil {
+	if d == nil || d.workers == nil || d.outbound == nil {
 		return nil, fmt.Errorf("local worker dispatcher not configured")
 	}
-	input.WorkerID = strings.TrimSpace(input.WorkerID)
+	input.WorkerEndpointID = strings.TrimSpace(input.WorkerEndpointID)
 	input.RuntimeKind = strings.TrimSpace(input.RuntimeKind)
-	if input.WorkerID == "" {
-		return nil, fmt.Errorf("local worker id is required")
+	if input.WorkerEndpointID == "" {
+		return nil, fmt.Errorf("worker endpoint id is required")
 	}
-	if !d.manager.IsOnline(input.TenantID, input.WorkerID) {
-		return nil, ErrWorkerNotConnected
+	endpointID, err := uuid.Parse(input.WorkerEndpointID)
+	if err != nil {
+		return nil, fmt.Errorf("parse worker endpoint id: %w", err)
 	}
 	payload, err := json.Marshal(input)
 	if err != nil {
@@ -91,7 +92,7 @@ func (d *Dispatcher) DispatchRun(ctx context.Context, input DispatchJobInput) (*
 			UpdatedAt: now,
 		},
 		TenantID: input.TenantID,
-		WorkerID: input.WorkerID,
+		WorkerID: input.WorkerEndpointID,
 		AgentID:  nilIfNilUUID(input.AgentID),
 		TaskID:   input.TaskID,
 		JobType:  JobTypeRunTask,
@@ -101,12 +102,12 @@ func (d *Dispatcher) DispatchRun(ctx context.Context, input DispatchJobInput) (*
 	if err := d.workers.CreateJob(store.WithTenantID(ctx, input.TenantID), job); err != nil {
 		return nil, err
 	}
-	if err := d.manager.Dispatch(ctx, input.TenantID, input.WorkerID, Envelope{
-		Type: EnvelopeJobDispatch,
-		Payload: map[string]any{
-			"jobId":       job.ID.String(),
-			"runtimeKind": input.RuntimeKind,
-			"job":         json.RawMessage(payload),
+	if err := d.outbound.Dispatch(ctx, endpointID, OutboundEnvelope{
+		Type: OutboundEnvelopeJobDispatch,
+		Payload: OutboundJobDispatch{
+			JobID:       job.ID.String(),
+			RuntimeKind: input.RuntimeKind,
+			Job:         json.RawMessage(payload),
 		},
 	}); err != nil {
 		_ = d.workers.UpdateJobStatus(store.WithTenantID(ctx, input.TenantID), job.ID, store.WorkerJobStatusFailed, []byte(err.Error()))

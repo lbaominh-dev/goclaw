@@ -26,6 +26,7 @@ import { slugify, isValidSlug } from "@/lib/slug";
 import { useProviders } from "@/pages/providers/hooks/use-providers";
 import { useProviderModels } from "@/pages/providers/hooks/use-provider-models";
 import { useProviderVerify } from "@/pages/providers/hooks/use-provider-verify";
+import { useWorkerEndpoints } from "@/hooks/use-worker-endpoints";
 import { useAgentPresets } from "./agent-presets";
 
 interface AgentCreateDialogProps {
@@ -47,7 +48,7 @@ export function AgentCreateDialog({ open, onOpenChange, onCreate }: AgentCreateD
   const [agentType, setAgentType] = useState<"open" | "predefined">("predefined");
   const [executionMode, setExecutionMode] = useState<"server" | "local_worker">("server");
   const [localRuntimeKind, setLocalRuntimeKind] = useState("");
-  const [boundWorkerId, setBoundWorkerId] = useState("");
+  const [workerEndpointId, setWorkerEndpointId] = useState("");
   const [description, setDescription] = useState("");
   const [selfEvolve, setSelfEvolve] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -63,6 +64,7 @@ export function AgentCreateDialog({ open, onOpenChange, onCreate }: AgentCreateD
   const selectedProviderId = selectedProvider?.id;
   const { models, loading: modelsLoading } = useProviderModels(selectedProviderId);
   const { verify, verifying, result: verifyResult, reset: resetVerify } = useProviderVerify();
+  const { items: workerEndpoints } = useWorkerEndpoints();
 
   // Reset verification when provider or model changes
   useEffect(() => {
@@ -97,7 +99,7 @@ export function AgentCreateDialog({ open, onOpenChange, onCreate }: AgentCreateD
         agent_type: agentType,
         execution_mode: executionMode,
         local_runtime_kind: executionMode === "local_worker" ? localRuntimeKind.trim() : undefined,
-        bound_worker_id: executionMode === "local_worker" ? boundWorkerId.trim() : undefined,
+        worker_endpoint_id: executionMode === "local_worker" ? workerEndpointId : undefined,
         other_config: Object.keys(otherConfig).length > 0 ? otherConfig : undefined,
       });
       onOpenChange(false);
@@ -110,7 +112,7 @@ export function AgentCreateDialog({ open, onOpenChange, onCreate }: AgentCreateD
       setAgentType("predefined");
       setExecutionMode("server");
       setLocalRuntimeKind("");
-      setBoundWorkerId("");
+      setWorkerEndpointId("");
       setDescription("");
       setSelfEvolve(false);
       setError("");
@@ -260,14 +262,20 @@ export function AgentCreateDialog({ open, onOpenChange, onCreate }: AgentCreateD
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="boundWorkerId">{t("create.boundWorkerId")}</Label>
-                  <Input
-                    id="boundWorkerId"
-                    value={boundWorkerId}
-                    onChange={(e) => setBoundWorkerId(e.target.value)}
-                    placeholder={t("create.boundWorkerIdPlaceholder")}
-                  />
-                  <p className="text-xs text-muted-foreground">{t("create.boundWorkerIdHint")}</p>
+                  <Label>{t("create.workerEndpoint")}</Label>
+                  <Select value={workerEndpointId} onValueChange={setWorkerEndpointId}>
+                    <SelectTrigger className="w-full text-base md:text-sm">
+                      <SelectValue placeholder={t("create.workerEndpointPlaceholder")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {workerEndpoints.map((endpoint) => (
+                        <SelectItem key={endpoint.id} value={endpoint.id}>
+                          {endpoint.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">{t("create.workerEndpointHint")}</p>
                 </div>
               </div>
             )}
@@ -342,11 +350,11 @@ export function AgentCreateDialog({ open, onOpenChange, onCreate }: AgentCreateD
           {loading ? (
             <Button disabled>{t("create.creating")}</Button>
           ) : !verifyResult?.valid && selectedProviderId && model.trim() ? (
-            <Button onClick={handleVerifyAndCreate} disabled={verifying || !displayName.trim() || !agentKey.trim() || !isValidSlug(agentKey) || (agentType === "predefined" && !description.trim()) || (executionMode === "local_worker" && (!localRuntimeKind.trim() || !boundWorkerId.trim()))}>
+            <Button onClick={handleVerifyAndCreate} disabled={verifying || !displayName.trim() || !agentKey.trim() || !isValidSlug(agentKey) || (agentType === "predefined" && !description.trim()) || (executionMode === "local_worker" && (!localRuntimeKind.trim() || !workerEndpointId))}>
               {verifying ? t("create.checking") : t("create.checkAndCreate")}
             </Button>
           ) : (
-            <Button onClick={handleCreate} disabled={!displayName.trim() || !agentKey.trim() || !isValidSlug(agentKey) || !provider.trim() || !model.trim() || !verifyResult?.valid || (agentType === "predefined" && !description.trim()) || (executionMode === "local_worker" && (!localRuntimeKind.trim() || !boundWorkerId.trim()))}>
+            <Button onClick={handleCreate} disabled={!displayName.trim() || !agentKey.trim() || !isValidSlug(agentKey) || !provider.trim() || !model.trim() || !verifyResult?.valid || (agentType === "predefined" && !description.trim()) || (executionMode === "local_worker" && (!localRuntimeKind.trim() || !workerEndpointId))}>
               {t("create.create")}
             </Button>
           )}

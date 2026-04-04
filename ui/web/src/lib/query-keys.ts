@@ -28,6 +28,9 @@ export const queryKeys = {
   cliCredentials: {
     all: ["cliCredentials"] as const,
   },
+  workerEndpoints: {
+    all: ["workerEndpoints"] as const,
+  },
   mcp: {
     all: ["mcp"] as const,
   },

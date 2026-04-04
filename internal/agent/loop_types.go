@@ -75,6 +75,7 @@ type Loop struct {
 	executionMode    string
 	localRuntimeKind string
 	boundWorkerID    string
+	workerEndpointID string
 	contextWindow    int
 	maxTokens        int // max output tokens per LLM call (0 = default 8192)
 	maxIterations    int
@@ -221,6 +222,7 @@ type LoopConfig struct {
 	ExecutionMode    string
 	LocalRuntimeKind string
 	BoundWorkerID    string
+	WorkerEndpointID string
 	ContextWindow    int
 	MaxTokens        int // max output tokens per LLM call (0 = default 8192)
 	MaxIterations    int
@@ -373,6 +375,7 @@ func NewLoop(cfg LoopConfig) *Loop {
 		executionMode:          cfg.ExecutionMode,
 		localRuntimeKind:       cfg.LocalRuntimeKind,
 		boundWorkerID:          cfg.BoundWorkerID,
+		workerEndpointID:       cfg.WorkerEndpointID,
 		contextWindow:          cfg.ContextWindow,
 		maxTokens:              cfg.MaxTokens,
 		maxIterations:          cfg.MaxIterations,

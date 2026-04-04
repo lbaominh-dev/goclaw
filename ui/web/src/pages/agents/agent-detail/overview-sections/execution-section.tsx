@@ -5,14 +5,15 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import type { AgentExecutionMode } from "@/types/agent";
+import { useWorkerEndpoints } from "@/hooks/use-worker-endpoints";
 
 interface ExecutionSectionProps {
   executionMode: AgentExecutionMode;
   onExecutionModeChange: (value: AgentExecutionMode) => void;
   localRuntimeKind: string;
   onLocalRuntimeKindChange: (value: string) => void;
-  boundWorkerId: string;
-  onBoundWorkerIdChange: (value: string) => void;
+  workerEndpointId: string;
+  onWorkerEndpointIdChange: (value: string) => void;
 }
 
 export function ExecutionSection({
@@ -20,10 +21,11 @@ export function ExecutionSection({
   onExecutionModeChange,
   localRuntimeKind,
   onLocalRuntimeKindChange,
-  boundWorkerId,
-  onBoundWorkerIdChange,
+  workerEndpointId,
+  onWorkerEndpointIdChange,
 }: ExecutionSectionProps) {
   const { t } = useTranslation("agents");
+  const { items: workerEndpoints } = useWorkerEndpoints();
 
   return (
     <section className="space-y-3 rounded-lg border p-3 sm:p-4 overflow-hidden">
@@ -58,15 +60,20 @@ export function ExecutionSection({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="boundWorkerId" className="text-xs">{t("execution.boundWorkerIdLabel")}</Label>
-            <Input
-              id="boundWorkerId"
-              value={boundWorkerId}
-              onChange={(e) => onBoundWorkerIdChange(e.target.value)}
-              placeholder={t("execution.boundWorkerIdPlaceholder")}
-              className="text-base md:text-sm"
-            />
-            <p className="text-xs text-muted-foreground">{t("execution.boundWorkerIdHint")}</p>
+            <Label className="text-xs">{t("execution.workerEndpointLabel")}</Label>
+            <Select value={workerEndpointId} onValueChange={onWorkerEndpointIdChange}>
+              <SelectTrigger className="w-full text-base md:text-sm">
+                <SelectValue placeholder={t("execution.workerEndpointPlaceholder")} />
+              </SelectTrigger>
+              <SelectContent>
+                {workerEndpoints.map((endpoint) => (
+                  <SelectItem key={endpoint.id} value={endpoint.id}>
+                    {endpoint.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">{t("execution.workerEndpointHint")}</p>
           </div>
         </div>
       )}

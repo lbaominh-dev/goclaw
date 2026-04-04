@@ -96,6 +96,9 @@ const ActivityPage = lazyWithRetry(() =>
 const CliCredentialsPage = lazyWithRetry(() =>
   import("@/pages/cli-credentials/cli-credentials-page").then((m) => ({ default: m.CliCredentialsPage })),
 );
+const WorkerEndpointsPage = lazyWithRetry(() =>
+  import("@/pages/workers/worker-endpoints-page").then((m) => ({ default: m.WorkerEndpointsPage })),
+);
 const ApiKeysPage = lazyWithRetry(() =>
   import("@/pages/api-keys/api-keys-page").then((m) => ({ default: m.ApiKeysPage })),
 );
@@ -170,6 +173,7 @@ export function AppRoutes() {
           <Route path={ROUTES.PROVIDERS} element={<RequireAdmin><ProvidersPage key="list" /></RequireAdmin>} />
           <Route path={ROUTES.PROVIDER_DETAIL} element={<RequireAdmin><ProvidersPage key="detail" /></RequireAdmin>} />
           <Route path={ROUTES.CLI_CREDENTIALS} element={<RequireAdmin><CliCredentialsPage /></RequireAdmin>} />
+          <Route path={ROUTES.WORKER_ENDPOINTS} element={<RequireAdmin><WorkerEndpointsPage /></RequireAdmin>} />
           <Route path={ROUTES.API_KEYS} element={<RequireAdmin><ApiKeysPage /></RequireAdmin>} />
           <Route path={ROUTES.CHANNELS} element={<RequireAdmin><ChannelsPage key="list" /></RequireAdmin>} />
           <Route path={ROUTES.CHANNEL_DETAIL} element={<RequireAdmin><ChannelsPage key="detail" /></RequireAdmin>} />

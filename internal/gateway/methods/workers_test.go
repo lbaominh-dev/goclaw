@@ -814,6 +814,235 @@ func TestWorkersJobFailedFailsLinkedTask(t *testing.T) {
 	}
 }
 
+func TestOutboundWorkerMessage_StartedMarksJobRunning(t *testing.T) {
+	ctx := context.Background()
+	tenantID := uuid.New()
+	endpointID := uuid.New()
+	jobID := uuid.New()
+	workerStore := &workerStoreStub{
+		jobs: map[uuid.UUID]*store.WorkerJobData{
+			jobID: {
+				BaseModel: store.BaseModel{ID: jobID},
+				TenantID:  tenantID,
+				WorkerID:  endpointID.String(),
+				Status:    store.WorkerJobStatusQueued,
+			},
+		},
+	}
+	methods := NewWorkersMethods(workerStore, localworker.NewManager(), nil, nil, nil)
+
+	err := methods.HandleOutboundWorkerMessage(store.WithTenantID(ctx, tenantID), endpointID, localworker.WorkerReplyEnvelope{
+		Type:  "job.started",
+		JobID: jobID.String(),
+	})
+	if err != nil {
+		t.Fatalf("HandleOutboundWorkerMessage error: %v", err)
+	}
+	if len(workerStore.runningJobs) != 1 || workerStore.runningJobs[0] != jobID {
+		t.Fatalf("running jobs = %#v, want [%s]", workerStore.runningJobs, jobID)
+	}
+}
+
+func TestOutboundWorkerMessage_OutputBroadcastsTaskProgress(t *testing.T) {
+	ctx := context.Background()
+	tenantID := uuid.New()
+	teamID := uuid.New()
+	taskID := uuid.New()
+	endpointID := uuid.New()
+	jobID := uuid.New()
+	workerStore := &workerStoreStub{
+		jobs: map[uuid.UUID]*store.WorkerJobData{
+			jobID: {
+				BaseModel: store.BaseModel{ID: jobID},
+				TenantID:  tenantID,
+				WorkerID:  endpointID.String(),
+				TaskID:    &taskID,
+				Status:    store.WorkerJobStatusRunning,
+			},
+		},
+	}
+	teamStore := &workerTeamStoreStub{task: &store.TeamTaskData{
+		BaseModel:  store.BaseModel{ID: taskID},
+		TeamID:     teamID,
+		TaskNumber: 11,
+		Subject:    "Stream output",
+		Status:     store.TeamTaskStatusInProgress,
+	}}
+	eventBus := &recordingEventPublisher{}
+	methods := NewWorkersMethods(workerStore, localworker.NewManager(), teamStore, eventBus, nil)
+
+	err := methods.HandleOutboundWorkerMessage(store.WithTenantID(ctx, tenantID), endpointID, localworker.WorkerReplyEnvelope{
+		Type:    "job.output",
+		JobID:   jobID.String(),
+		Payload: json.RawMessage(`{"delta":"Line 1"}`),
+	})
+	if err != nil {
+		t.Fatalf("HandleOutboundWorkerMessage error: %v", err)
+	}
+	if len(teamStore.progressCalls) != 0 {
+		t.Fatalf("output should remain observational, got %#v", teamStore.progressCalls)
+	}
+	event := singleRecordedEvent(t, eventBus.events)
+	if event.name != protocol.EventTeamTaskProgress {
+		t.Fatalf("event name = %q, want %q", event.name, protocol.EventTeamTaskProgress)
+	}
+}
+
+func TestOutboundWorkerMessage_StatusUpdatesLinkedTask(t *testing.T) {
+	ctx := context.Background()
+	tenantID := uuid.New()
+	teamID := uuid.New()
+	taskID := uuid.New()
+	endpointID := uuid.New()
+	jobID := uuid.New()
+	workerStore := &workerStoreStub{
+		jobs: map[uuid.UUID]*store.WorkerJobData{
+			jobID: {
+				BaseModel: store.BaseModel{ID: jobID},
+				TenantID:  tenantID,
+				WorkerID:  endpointID.String(),
+				TaskID:    &taskID,
+				Status:    store.WorkerJobStatusRunning,
+			},
+		},
+	}
+	teamStore := &workerTeamStoreStub{task: &store.TeamTaskData{
+		BaseModel:       store.BaseModel{ID: taskID},
+		TeamID:          teamID,
+		TaskNumber:      12,
+		Subject:         "Track outbound status",
+		Status:          store.TeamTaskStatusInProgress,
+		ProgressPercent: 20,
+	}}
+	eventBus := &recordingEventPublisher{}
+	methods := NewWorkersMethods(workerStore, localworker.NewManager(), teamStore, eventBus, nil)
+
+	err := methods.HandleOutboundWorkerMessage(store.WithTenantID(ctx, tenantID), endpointID, localworker.WorkerReplyEnvelope{
+		Type:    "job.status",
+		JobID:   jobID.String(),
+		Status:  "streaming",
+		Payload: json.RawMessage(`{"message":"Running tests","progress":44}`),
+	})
+	if err != nil {
+		t.Fatalf("HandleOutboundWorkerMessage error: %v", err)
+	}
+	update, ok := workerStore.jobStatusUpdates[jobID]
+	if !ok {
+		t.Fatal("expected persisted job status update")
+	}
+	if update.status != "streaming" {
+		t.Fatalf("status = %q, want %q", update.status, "streaming")
+	}
+	if len(teamStore.progressCalls) != 1 {
+		t.Fatalf("progress calls = %d, want 1", len(teamStore.progressCalls))
+	}
+	if teamStore.progressCalls[0].percent != 44 {
+		t.Fatalf("progress percent = %d, want 44", teamStore.progressCalls[0].percent)
+	}
+	event := singleRecordedEvent(t, eventBus.events)
+	if event.name != protocol.EventTeamTaskProgress {
+		t.Fatalf("event name = %q, want %q", event.name, protocol.EventTeamTaskProgress)
+	}
+}
+
+func TestOutboundWorkerMessage_CompletedCompletesLinkedTask(t *testing.T) {
+	ctx := context.Background()
+	tenantID := uuid.New()
+	teamID := uuid.New()
+	taskID := uuid.New()
+	endpointID := uuid.New()
+	jobID := uuid.New()
+	workerStore := &workerStoreStub{
+		jobs: map[uuid.UUID]*store.WorkerJobData{
+			jobID: {
+				BaseModel: store.BaseModel{ID: jobID},
+				TenantID:  tenantID,
+				WorkerID:  endpointID.String(),
+				TaskID:    &taskID,
+				Status:    store.WorkerJobStatusRunning,
+			},
+		},
+	}
+	teamStore := &workerTeamStoreStub{task: &store.TeamTaskData{
+		BaseModel:  store.BaseModel{ID: taskID},
+		TeamID:     teamID,
+		TaskNumber: 13,
+		Subject:    "Finish outbound work",
+		Status:     store.TeamTaskStatusInProgress,
+	}}
+	eventBus := &recordingEventPublisher{}
+	postTurn := &workerPostTurnStub{}
+	methods := NewWorkersMethods(workerStore, localworker.NewManager(), teamStore, eventBus, postTurn)
+
+	err := methods.HandleOutboundWorkerMessage(store.WithTenantID(ctx, tenantID), endpointID, localworker.WorkerReplyEnvelope{
+		Type:    "job.completed",
+		JobID:   jobID.String(),
+		Payload: json.RawMessage(`{"summary":"All tests passed"}`),
+	})
+	if err != nil {
+		t.Fatalf("HandleOutboundWorkerMessage error: %v", err)
+	}
+	if len(teamStore.completeCalls) != 1 {
+		t.Fatalf("complete calls = %d, want 1", len(teamStore.completeCalls))
+	}
+	if len(postTurn.dispatchedTeamIDs) != 1 || postTurn.dispatchedTeamIDs[0] != teamID {
+		t.Fatalf("dispatched team IDs = %#v, want [%s]", postTurn.dispatchedTeamIDs, teamID)
+	}
+	event := singleRecordedEvent(t, eventBus.events)
+	if event.name != protocol.EventTeamTaskCompleted {
+		t.Fatalf("event name = %q, want %q", event.name, protocol.EventTeamTaskCompleted)
+	}
+}
+
+func TestOutboundWorkerMessage_FailedFailsLinkedTask(t *testing.T) {
+	ctx := context.Background()
+	tenantID := uuid.New()
+	teamID := uuid.New()
+	taskID := uuid.New()
+	endpointID := uuid.New()
+	jobID := uuid.New()
+	workerStore := &workerStoreStub{
+		jobs: map[uuid.UUID]*store.WorkerJobData{
+			jobID: {
+				BaseModel: store.BaseModel{ID: jobID},
+				TenantID:  tenantID,
+				WorkerID:  endpointID.String(),
+				TaskID:    &taskID,
+				Status:    store.WorkerJobStatusRunning,
+			},
+		},
+	}
+	teamStore := &workerTeamStoreStub{task: &store.TeamTaskData{
+		BaseModel:  store.BaseModel{ID: taskID},
+		TeamID:     teamID,
+		TaskNumber: 14,
+		Subject:    "Fail outbound work",
+		Status:     store.TeamTaskStatusInProgress,
+	}}
+	eventBus := &recordingEventPublisher{}
+	postTurn := &workerPostTurnStub{}
+	methods := NewWorkersMethods(workerStore, localworker.NewManager(), teamStore, eventBus, postTurn)
+
+	err := methods.HandleOutboundWorkerMessage(store.WithTenantID(ctx, tenantID), endpointID, localworker.WorkerReplyEnvelope{
+		Type:  "job.failed",
+		JobID: jobID.String(),
+		Error: json.RawMessage(`{"message":"boom"}`),
+	})
+	if err != nil {
+		t.Fatalf("HandleOutboundWorkerMessage error: %v", err)
+	}
+	if len(teamStore.failCalls) != 1 {
+		t.Fatalf("fail calls = %d, want 1", len(teamStore.failCalls))
+	}
+	if len(postTurn.dispatchedTeamIDs) != 1 || postTurn.dispatchedTeamIDs[0] != teamID {
+		t.Fatalf("dispatched team IDs = %#v, want [%s]", postTurn.dispatchedTeamIDs, teamID)
+	}
+	event := singleRecordedEvent(t, eventBus.events)
+	if event.name != protocol.EventTeamTaskFailed {
+		t.Fatalf("event name = %q, want %q", event.name, protocol.EventTeamTaskFailed)
+	}
+}
+
 func TestWorkersDisconnectMarksWorkerOffline(t *testing.T) {
 	tenantID := uuid.New()
 	workerStore := &workerStoreStub{}

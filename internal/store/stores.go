@@ -34,4 +34,5 @@ type Stores struct {
 	SystemConfigs         SystemConfigStore
 	SubagentTasks         SubagentTaskStore
 	Workers               WorkerStore
+	WorkerEndpoints       WorkerEndpointStore
 }

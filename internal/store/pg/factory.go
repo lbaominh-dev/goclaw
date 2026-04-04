@@ -52,5 +52,6 @@ func NewPGStores(cfg store.StoreConfig) (*store.Stores, error) {
 		SystemConfigs:         NewPGSystemConfigStore(db),
 		SubagentTasks:         NewPGSubagentTaskStore(db),
 		Workers:               NewPGWorkerStore(db),
+		WorkerEndpoints:       NewPGWorkerEndpointStore(db),
 	}, nil
 }

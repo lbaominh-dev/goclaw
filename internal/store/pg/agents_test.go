@@ -4,7 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"reflect"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
@@ -13,6 +16,7 @@ func TestPGAgentStore_CreateAndGet_LocalWorkerFields(t *testing.T) {
 	db := newTestPGAgentDB(t)
 	ctx := store.WithCrossTenant(store.WithTenantID(context.Background(), store.MasterTenantID))
 	agentStore := NewPGAgentStore(db)
+	endpointID := createPGWorkerEndpoint(t, db, ctx, "pg-local-worker-endpoint")
 
 	agent := &store.AgentData{
 		TenantID:            store.MasterTenantID,
@@ -31,6 +35,7 @@ func TestPGAgentStore_CreateAndGet_LocalWorkerFields(t *testing.T) {
 		LocalRuntimeKind:    "wails_desktop",
 		BoundWorkerID:       "worker-123",
 	}
+	setPGAgentWorkerEndpointID(t, agent, endpointID)
 
 	if err := agentStore.Create(ctx, agent); err != nil {
 		t.Fatalf("Create error: %v", err)
@@ -50,67 +55,16 @@ func TestPGAgentStore_CreateAndGet_LocalWorkerFields(t *testing.T) {
 	if got.BoundWorkerID != "worker-123" {
 		t.Fatalf("BoundWorkerID = %q, want worker-123", got.BoundWorkerID)
 	}
-}
-
-func TestPGAgentExecutionSettingsValidation(t *testing.T) {
-	tests := []struct {
-		name    string
-		agent   store.AgentData
-		wantErr bool
-	}{
-		{
-			name:  "default server mode is valid",
-			agent: store.AgentData{},
-		},
-		{
-			name: "explicit server mode rejects local worker fields",
-			agent: store.AgentData{
-				ExecutionMode:    store.AgentExecutionModeServer,
-				LocalRuntimeKind: "wails_desktop",
-			},
-			wantErr: true,
-		},
-		{
-			name: "invalid execution mode rejected",
-			agent: store.AgentData{
-				ExecutionMode: "invalid",
-			},
-			wantErr: true,
-		},
-		{
-			name: "local worker requires runtime kind and bound worker id",
-			agent: store.AgentData{
-				ExecutionMode: store.AgentExecutionModeLocalWorker,
-			},
-			wantErr: true,
-		},
-		{
-			name: "local worker with required fields is valid",
-			agent: store.AgentData{
-				ExecutionMode:    store.AgentExecutionModeLocalWorker,
-				LocalRuntimeKind: "wails_desktop",
-				BoundWorkerID:    "worker-123",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := store.ValidateAgentExecutionSettings(tt.agent.ExecutionMode, tt.agent.LocalRuntimeKind, tt.agent.BoundWorkerID)
-			if tt.wantErr && err == nil {
-				t.Fatal("expected validation error, got nil")
-			}
-			if !tt.wantErr && err != nil {
-				t.Fatalf("unexpected validation error: %v", err)
-			}
-		})
+	if gotWorkerEndpointID := getPGAgentWorkerEndpointID(t, got); gotWorkerEndpointID != endpointID {
+		t.Fatalf("WorkerEndpointID = %q, want %q", gotWorkerEndpointID, endpointID)
 	}
 }
 
-func TestPGAgentStore_UpdateRejectsInvalidLocalWorkerSettings(t *testing.T) {
+func TestAgentExecutionSettingsRequireWorkerEndpointIDPG(t *testing.T) {
 	db := newTestPGAgentDB(t)
 	ctx := store.WithCrossTenant(store.WithTenantID(context.Background(), store.MasterTenantID))
 	agentStore := NewPGAgentStore(db)
+	endpointID := createPGWorkerEndpoint(t, db, ctx, "pg-required-endpoint")
 
 	agent := &store.AgentData{
 		TenantID:            store.MasterTenantID,
@@ -145,9 +99,17 @@ func TestPGAgentStore_UpdateRejectsInvalidLocalWorkerSettings(t *testing.T) {
 	if err := agentStore.Update(ctx, agent.ID, map[string]any{
 		"execution_mode":     store.AgentExecutionModeLocalWorker,
 		"local_runtime_kind": "wails_desktop",
-		"bound_worker_id":    "worker-123",
+		"worker_endpoint_id": endpointID,
 	}); err != nil {
 		t.Fatalf("valid local_worker update error: %v", err)
+	}
+
+	got, err = agentStore.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetByID after valid local_worker update error: %v", err)
+	}
+	if gotWorkerEndpointID := getPGAgentWorkerEndpointID(t, got); gotWorkerEndpointID != endpointID {
+		t.Fatalf("WorkerEndpointID after valid local_worker update = %q, want %q", gotWorkerEndpointID, endpointID)
 	}
 
 	if err := agentStore.Update(ctx, agent.ID, map[string]any{"execution_mode": store.AgentExecutionModeServer}); err == nil {
@@ -158,7 +120,7 @@ func TestPGAgentStore_UpdateRejectsInvalidLocalWorkerSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID after failed server update error: %v", err)
 	}
-	if got.ExecutionMode != store.AgentExecutionModeLocalWorker || got.LocalRuntimeKind != "wails_desktop" || got.BoundWorkerID != "worker-123" {
+	if got.ExecutionMode != store.AgentExecutionModeLocalWorker || got.LocalRuntimeKind != "wails_desktop" || getPGAgentWorkerEndpointID(t, got) != endpointID {
 		t.Fatalf("agent state changed after failed server update: %+v", got)
 	}
 }
@@ -167,6 +129,7 @@ func TestPGAgentStore_UpdateTransitionsLocalWorkerToServer(t *testing.T) {
 	db := newTestPGAgentDB(t)
 	ctx := store.WithCrossTenant(store.WithTenantID(context.Background(), store.MasterTenantID))
 	agentStore := NewPGAgentStore(db)
+	endpointID := createPGWorkerEndpoint(t, db, ctx, "pg-transition-endpoint")
 
 	agent := &store.AgentData{
 		TenantID:            store.MasterTenantID,
@@ -185,6 +148,7 @@ func TestPGAgentStore_UpdateTransitionsLocalWorkerToServer(t *testing.T) {
 		LocalRuntimeKind:    "wails_desktop",
 		BoundWorkerID:       "worker-123",
 	}
+	setPGAgentWorkerEndpointID(t, agent, endpointID)
 	if err := agentStore.Create(ctx, agent); err != nil {
 		t.Fatalf("Create error: %v", err)
 	}
@@ -193,6 +157,7 @@ func TestPGAgentStore_UpdateTransitionsLocalWorkerToServer(t *testing.T) {
 		"execution_mode":     store.AgentExecutionModeServer,
 		"local_runtime_kind": nil,
 		"bound_worker_id":    nil,
+		"worker_endpoint_id": nil,
 	}); err != nil {
 		t.Fatalf("Update error: %v", err)
 	}
@@ -210,6 +175,39 @@ func TestPGAgentStore_UpdateTransitionsLocalWorkerToServer(t *testing.T) {
 	if got.BoundWorkerID != "" {
 		t.Fatalf("BoundWorkerID = %q, want empty", got.BoundWorkerID)
 	}
+	if gotWorkerEndpointID := getPGAgentWorkerEndpointID(t, got); gotWorkerEndpointID != "" {
+		t.Fatalf("WorkerEndpointID = %q, want empty", gotWorkerEndpointID)
+	}
+}
+
+func setPGAgentWorkerEndpointID(t *testing.T, agent *store.AgentData, endpointID string) {
+	t.Helper()
+	field := reflect.ValueOf(agent).Elem().FieldByName("WorkerEndpointID")
+	if !field.IsValid() {
+		t.Fatal("AgentData.WorkerEndpointID field missing")
+	}
+	field.SetString(endpointID)
+}
+
+func getPGAgentWorkerEndpointID(t *testing.T, agent *store.AgentData) string {
+	t.Helper()
+	field := reflect.ValueOf(agent).Elem().FieldByName("WorkerEndpointID")
+	if !field.IsValid() {
+		t.Fatal("AgentData.WorkerEndpointID field missing")
+	}
+	return field.String()
+}
+
+func createPGWorkerEndpoint(t *testing.T, db *sql.DB, ctx context.Context, name string) string {
+	t.Helper()
+	endpointID := uuid.New().String()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO worker_endpoint_profiles (id, tenant_id, name, runtime_kind, endpoint_url, auth_token)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, endpointID, store.MasterTenantID, name, "wails_desktop", "http://127.0.0.1:18790", "token"); err != nil {
+		t.Fatalf("insert worker endpoint error: %v", err)
+	}
+	return endpointID
 }
 
 func newTestPGAgentDB(t *testing.T) *sql.DB {
@@ -279,6 +277,7 @@ func applyTestPGAgentSchema(t *testing.T, db *sql.DB) {
 		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS execution_mode VARCHAR(32) NOT NULL DEFAULT 'server'`,
 		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS local_runtime_kind VARCHAR(64)`,
 		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS bound_worker_id VARCHAR(255)`,
+		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS worker_endpoint_id UUID REFERENCES worker_endpoint_profiles(id) ON DELETE SET NULL`,
 	}
 
 	for _, stmt := range stmts {

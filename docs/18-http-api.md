@@ -102,11 +102,33 @@ Agent create and update also support local-backed execution fields:
 {
   "execution_mode": "local_worker",
   "local_runtime_kind": "claude_cli",
-  "bound_worker_id": "worker-mbp-01"
+  "worker_endpoint_id": "019d53c5-7908-7eec-8d3a-f05c2e6cb18b"
 }
 ```
 
 Use `execution_mode: "server"` for normal server-side execution.
+
+### Worker Endpoint Profiles
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `GET` | `/v1/worker-endpoints` | List worker endpoint profiles | Bearer |
+| `POST` | `/v1/worker-endpoints` | Create worker endpoint profile | Bearer |
+| `PUT` | `/v1/worker-endpoints/{id}` | Update worker endpoint profile | Bearer |
+| `DELETE` | `/v1/worker-endpoints/{id}` | Delete worker endpoint profile | Bearer |
+
+Worker endpoint profile request example:
+
+```json
+{
+  "name": "Minh MacBook Claude",
+  "runtime_kind": "claude_cli",
+  "endpoint_url": "ws://192.168.1.20:8787/ws",
+  "auth_token": "Bearer abc123"
+}
+```
+
+The server stores the auth token but redacts it from response payloads.
 
 ### Shares
 
