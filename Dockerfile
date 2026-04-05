@@ -2,7 +2,7 @@
 
 # ── Stage 0: Build Web UI (conditional) ──
 FROM node:22-alpine AS web-builder
-RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
+RUN corepack enable && corepack prepare pnpm@10.30.1 --activate
 WORKDIR /app
 # Copy .npmrc first so pnpm resolves musl native bindings (needed on Alpine).
 # The lockfile already includes musl entries thanks to supportedArchitectures in .npmrc.
