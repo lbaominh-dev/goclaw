@@ -1,6 +1,8 @@
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { chmodSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import WebSocket from "ws";
 import { afterEach, describe, expect, test } from "vitest";
@@ -8,6 +10,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { createServer } from "./server.js";
 
 const tempDirs: string[] = [];
+const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), "test", "fixtures");
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
@@ -88,18 +91,16 @@ describe("createServer", () => {
     const root = makeTempDir();
     const workspace = join(root, "workspace");
     mkdirSync(workspace);
-    const fakeOpencode = join(
-      "/Users/baominh/Dev/Personal/Automation/goclaw/.worktrees/opencode-worker-server/workers/opencode-node/src/test/fixtures",
-      "fake-opencode.js",
-    );
+    const fakeOpencode = join(fixtureDir, "fake-opencode.js");
+    chmodSync(fakeOpencode, 0o755);
 
     const server = createServer({
       port: 0,
       path: "/ws",
       authToken: "secret-token",
       authHeader: "Authorization",
-      opencodeCommand: process.execPath,
-      opencodeArgs: [fakeOpencode],
+      opencodeCommand: fakeOpencode,
+      opencodeArgs: [],
       workspaces: { main: workspace },
     });
     await server.start();
@@ -144,6 +145,7 @@ describe("createServer", () => {
       });
 
       socket.close();
+      await waitForClose(socket);
     } finally {
       await server.stop();
     }

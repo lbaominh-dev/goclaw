@@ -23,6 +23,21 @@ Environment variables:
 - `OPENCODE_ARGS_JSON` optional JSON string array
 - `WORKSPACES_JSON` JSON object mapping workspace keys to absolute paths
 
+For `runtimeKind = opencode`, the worker invokes the OpenCode CLI as:
+
+```bash
+opencode run "<task prompt>"
+```
+
+`OPENCODE_COMMAND` should point to the `opencode` executable.
+
+`OPENCODE_ARGS_JSON` should contain extra flags for `opencode run`, not the `run` subcommand itself. Example:
+
+```dotenv
+OPENCODE_COMMAND=opencode
+OPENCODE_ARGS_JSON='["--model","anthropic/claude-sonnet-4"]'
+```
+
 On startup, the worker also loads dotenv files from its current working directory:
 
 1. `.env` loads first.

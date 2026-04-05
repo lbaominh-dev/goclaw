@@ -1,15 +1,61 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 
 import type { WorkerConfig } from "./config.js";
 import type { RunJob } from "./job-manager.js";
 import type { WorkerReply } from "./protocol.js";
 
-export function createOpencodeRunner(config: Pick<WorkerConfig, "opencodeCommand" | "opencodeArgs">): RunJob {
+type RunnerConfig = Pick<WorkerConfig, "opencodeCommand" | "opencodeArgs">;
+
+type RunnerPayload = {
+  jobId: string;
+  runtimeKind: "opencode";
+  job: unknown;
+  execution: { workspaceKey: string };
+  workspacePath: string;
+};
+
+export function buildOpencodePrompt(payload: RunnerPayload): string {
+  const job = (payload.job ?? {}) as Record<string, unknown>;
+  const message = typeof job.message === "string" ? job.message.trim() : "";
+  if (message !== "") {
+    return message;
+  }
+
+  const lines = [
+    "Execute this GoClaw local worker task.",
+    `jobId: ${payload.jobId}`,
+    `workspaceKey: ${payload.execution.workspaceKey}`,
+  ];
+
+  for (const key of ["runId", "sessionKey", "agentKey", "teamTaskId"] as const) {
+    const value = job[key];
+    if (typeof value === "string" && value.trim() !== "") {
+      lines.push(`${key}: ${value}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+export function buildOpencodeCommand(config: RunnerConfig, payload: RunnerPayload): { command: string; args: string[] } {
+  return {
+    command: config.opencodeCommand,
+    args: ["run", ...config.opencodeArgs, buildOpencodePrompt(payload)],
+  };
+}
+
+type SpawnProcess = (command: string, args: string[], options: Parameters<typeof spawn>[2]) => ChildProcess;
+
+export function createOpencodeRunner(
+  config: Pick<WorkerConfig, "opencodeCommand" | "opencodeArgs">,
+  spawnProcess: SpawnProcess = spawn,
+): RunJob {
   return async (payload, control) =>
     new Promise<WorkerReply>((resolve) => {
-      const child = spawn(config.opencodeCommand, config.opencodeArgs, {
+      const command = buildOpencodeCommand(config, payload as RunnerPayload);
+      const child = spawnProcess(command.command, command.args, {
         cwd: payload.workspacePath,
-        stdio: ["pipe", "pipe", "pipe"],
+        stdio: ["ignore", "pipe", "pipe"],
         env: process.env,
       });
 
@@ -41,7 +87,7 @@ export function createOpencodeRunner(config: Pick<WorkerConfig, "opencodeCommand
         });
       });
 
-      child.stdout.on("data", (chunk: Buffer | string) => {
+      child.stdout?.on("data", (chunk: Buffer | string) => {
         control.send({
           type: "job.output",
           jobId: payload.jobId,
@@ -49,7 +95,7 @@ export function createOpencodeRunner(config: Pick<WorkerConfig, "opencodeCommand
         });
       });
 
-      child.stderr.on("data", (chunk: Buffer | string) => {
+      child.stderr?.on("data", (chunk: Buffer | string) => {
         control.send({
           type: "job.output",
           jobId: payload.jobId,
@@ -83,6 +129,5 @@ export function createOpencodeRunner(config: Pick<WorkerConfig, "opencodeCommand
         });
       });
 
-      child.stdin.end(`${JSON.stringify(payload)}\n`);
     });
 }
