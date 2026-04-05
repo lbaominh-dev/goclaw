@@ -20,7 +20,7 @@ export type WorkerConfig = {
   workspaces: Record<string, string>;
 };
 
-type EnvMap = Record<string, string | undefined>;
+export type EnvMap = Record<string, string | undefined>;
 
 export function loadConfig(input?: WorkerConfigInput, env: EnvMap = process.env): WorkerConfig {
   const port = input?.port ?? parseInteger(env.PORT) ?? 8787;

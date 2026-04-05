@@ -1,9 +1,10 @@
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { loadConfig } from "./config.js";
+import { loadStartupEnv } from "./env-loader.js";
 
 const tempDirs: string[] = [];
 
@@ -17,6 +18,14 @@ function makeTempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "opencode-worker-config-"));
   tempDirs.push(dir);
   return dir;
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+  process.env[name] = value;
 }
 
 describe("loadConfig", () => {
@@ -70,5 +79,56 @@ describe("loadConfig", () => {
     expect(config.authHeader).toBe("X-Worker-Token");
     expect(config.authToken).toBe("env-secret");
     expect(config.workspaces.env).toBe(workspace);
+  });
+
+  test("loads startup values from .env and lets .env.local override them", () => {
+    const root = makeTempDir();
+    const workspace = join(root, "workspace-c");
+    mkdirSync(workspace);
+    writeFileSync(join(root, ".env"), "PORT=8111\nWS_PATH=from-env\n");
+    writeFileSync(join(root, ".env.local"), "PORT=8222\n");
+
+    const originalCwd = process.cwd();
+    const originalPort = process.env.PORT;
+    const originalWsPath = process.env.WS_PATH;
+    delete process.env.PORT;
+    delete process.env.WS_PATH;
+    process.chdir(root);
+
+    try {
+      const env = loadStartupEnv({
+        AUTH_TOKEN: "secret-token",
+        OPENCODE_COMMAND: process.execPath,
+        WORKSPACES_JSON: JSON.stringify({ main: workspace }),
+      });
+
+      const config = loadConfig(undefined, env);
+
+      expect(env.PORT).toBe("8222");
+      expect(env.WS_PATH).toBe("from-env");
+      expect(config.port).toBe(8222);
+      expect(config.path).toBe("/from-env");
+    } finally {
+      process.chdir(originalCwd);
+      restoreEnv("PORT", originalPort);
+      restoreEnv("WS_PATH", originalWsPath);
+    }
+  });
+
+  test("keeps explicit env values over .env.local overrides", () => {
+    const root = makeTempDir();
+    writeFileSync(join(root, ".env"), "PORT=8111\n");
+    writeFileSync(join(root, ".env.local"), "PORT=8222\n");
+
+    const originalCwd = process.cwd();
+    process.chdir(root);
+
+    try {
+      const env = loadStartupEnv({ PORT: "9001" });
+
+      expect(env.PORT).toBe("9001");
+    } finally {
+      process.chdir(originalCwd);
+    }
   });
 });
