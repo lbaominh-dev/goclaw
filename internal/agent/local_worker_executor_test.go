@@ -459,7 +459,7 @@ func TestRunRequest_LocalWorkerMember_WaitsForWorkerCompletion(t *testing.T) {
 		}
 		jobID := workerStore.jobs[0].ID.String()
 		endpointServer.replyJSON(t, map[string]any{"type": "job.started", "jobId": jobID})
-		endpointServer.replyJSON(t, map[string]any{"type": "job.output", "jobId": jobID, "payload": map[string]any{"delta": "working"}})
+		endpointServer.replyJSON(t, map[string]any{"type": "job.output", "jobId": jobID, "payload": map[string]any{"type": "Thinking", "stream": "stdout", "chunk": "working"}})
 		endpointServer.replyJSON(t, map[string]any{"type": "job.completed", "jobId": jobID, "payload": map[string]any{"content": "worker done"}})
 	}()
 
@@ -485,8 +485,40 @@ func TestRunRequest_LocalWorkerMember_WaitsForWorkerCompletion(t *testing.T) {
 	if result.Content != "worker done" {
 		t.Fatalf("Content = %q, want %q", result.Content, "worker done")
 	}
+	if len(workerStore.jobs) != 1 {
+		t.Fatalf("created jobs = %d, want 1", len(workerStore.jobs))
+	}
+	if got := string(workerStore.jobs[0].Payload); !strings.Contains(got, `"sessionKey":"agent:test:ws:direct:chat-sync"`) {
+		t.Fatalf("job payload = %s, want sessionKey propagated", got)
+	}
 	if provider.chatCalls != 0 || provider.chatStreamCalls != 0 {
 		t.Fatalf("provider should not be used, got chat=%d stream=%d", provider.chatCalls, provider.chatStreamCalls)
+	}
+}
+
+func TestParseLocalWorkerOutput_UsesChunkAndType(t *testing.T) {
+	output := parseLocalWorkerOutput(localworker.WorkerReplyEnvelope{
+		Type:    "job.output",
+		Payload: json.RawMessage(`{"type":"Thinking","chunk":"planning...","stream":"stdout"}`),
+	})
+	if output.Type != "Thinking" {
+		t.Fatalf("Type = %q, want %q", output.Type, "Thinking")
+	}
+	if output.Chunk != "planning..." {
+		t.Fatalf("Chunk = %q, want %q", output.Chunk, "planning...")
+	}
+}
+
+func TestParseLocalWorkerOutput_FallsBackToChunkWithoutRenderingPayload(t *testing.T) {
+	output := parseLocalWorkerOutput(localworker.WorkerReplyEnvelope{
+		Type:    "job.output",
+		Payload: json.RawMessage(`{"stream":"stdout","chunk":"hello\n"}`),
+	})
+	if output.Type != "Thinking" {
+		t.Fatalf("Type = %q, want %q", output.Type, "Thinking")
+	}
+	if output.Chunk != "hello\n" {
+		t.Fatalf("Chunk = %q, want %q", output.Chunk, "hello\\n")
 	}
 }
 

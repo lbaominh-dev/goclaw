@@ -58,6 +58,26 @@ function waitForMessageTypes(socket: WebSocket, expectedTypes: string[]): Promis
   });
 }
 
+function waitForMessageType(socket: WebSocket, expectedType: string): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const onMessage = (data: WebSocket.RawData) => {
+      const message = JSON.parse(String(data)) as Record<string, unknown>;
+      if (String(message.type) !== expectedType) {
+        return;
+      }
+      socket.off("message", onMessage);
+      socket.off("error", onError);
+      resolve(message);
+    };
+    const onError = (error: Error) => {
+      socket.off("message", onMessage);
+      reject(error);
+    };
+    socket.on("message", onMessage);
+    socket.once("error", onError);
+  });
+}
+
 describe("createServer", () => {
   test("rejects handshake with invalid auth header", async () => {
     const root = makeTempDir();
@@ -112,6 +132,7 @@ describe("createServer", () => {
       await waitForOpen(socket);
 
       const messagesPromise = waitForMessageTypes(socket, ["job.started", "job.output", "job.failed"]);
+      const firstOutputPromise = waitForMessageType(socket, "job.output");
       socket.send(
         JSON.stringify({
           type: "job.dispatch",
@@ -124,7 +145,7 @@ describe("createServer", () => {
         }),
       );
 
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await firstOutputPromise;
       socket.send(
         JSON.stringify({
           type: "job.cancel",
@@ -138,6 +159,15 @@ describe("createServer", () => {
       const messages = await messagesPromise;
       expect(messages.some((message) => message.type === "job.started")).toBe(true);
       expect(messages.some((message) => message.type === "job.output")).toBe(true);
+      const output = messages.find((message) => message.type === "job.output");
+      expect(output).toMatchObject({
+        type: "job.output",
+        jobId: "job-1",
+        payload: {
+          type: "Thinking",
+          chunk: expect.any(String),
+        },
+      });
       expect(messages.at(-1)).toEqual({
         type: "job.failed",
         jobId: "job-1",

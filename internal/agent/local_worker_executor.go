@@ -13,6 +13,11 @@ import (
 	"github.com/nextlevelbuilder/goclaw/pkg/protocol"
 )
 
+type localWorkerOutput struct {
+	Type  string
+	Chunk string
+}
+
 func (l *Loop) dispatchLocalWorkerRun(ctx context.Context, req RunRequest) (*RunResult, error) {
 	if l.localWorkerDispatcher == nil {
 		return nil, fmt.Errorf("local worker dispatcher not configured")
@@ -107,8 +112,14 @@ func (l *Loop) dispatchLocalWorkerRun(ctx context.Context, req RunRequest) (*Run
 					"workerId": l.workerEndpointID,
 				})
 			case "job.output", "job.status":
-				if text := describeLocalWorkerReply(msg); text != "" {
-					emit(protocol.ChatEventChunk, map[string]any{"content": text})
+				output := parseLocalWorkerOutput(msg)
+				if strings.TrimSpace(output.Chunk) != "" {
+					switch output.Type {
+					case "Final":
+						emit(protocol.ChatEventChunk, map[string]any{"content": output.Chunk})
+					default:
+						emit(protocol.ChatEventThinking, map[string]any{"content": output.Chunk})
+					}
 				}
 			case "job.completed":
 				return &RunResult{
@@ -123,6 +134,42 @@ func (l *Loop) dispatchLocalWorkerRun(ctx context.Context, req RunRequest) (*Run
 				return nil, fmt.Errorf("%s", describeLocalWorkerReply(msg))
 			}
 		}
+	}
+}
+
+func parseLocalWorkerOutput(reply localworker.WorkerReplyEnvelope) localWorkerOutput {
+	var payload struct {
+		Type    string `json:"type"`
+		Chunk   string `json:"chunk"`
+		Stream  string `json:"stream"`
+		Text    string `json:"text"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(reply.Payload, &payload); err != nil {
+		return localWorkerOutput{}
+	}
+	chunk := payload.Chunk
+	if chunk == "" {
+		chunk = payload.Text
+	}
+	if chunk == "" {
+		chunk = payload.Message
+	}
+	kind := strings.TrimSpace(payload.Type)
+	if kind == "" {
+		kind = inferLocalWorkerOutputType(payload.Stream, chunk)
+	}
+	return localWorkerOutput{Type: kind, Chunk: chunk}
+}
+
+func inferLocalWorkerOutputType(stream, chunk string) string {
+	switch {
+	case strings.EqualFold(strings.TrimSpace(stream), "stderr"):
+		return "Error"
+	case strings.TrimSpace(chunk) == "":
+		return ""
+	default:
+		return "Thinking"
 	}
 }
 

@@ -2,7 +2,21 @@
 
 import process from "node:process";
 
-const [subcommand, prompt = ""] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const [subcommand, ...runArgs] = args;
+
+let prompt = "";
+for (let i = 0; i < runArgs.length; i += 1) {
+  const arg = runArgs[i] ?? "";
+  if (arg === "--session") {
+    i += 1;
+    continue;
+  }
+  if (arg.startsWith("-")) {
+    continue;
+  }
+  prompt = arg;
+}
 
 if (subcommand !== "run") {
   process.stderr.write(`unexpected-subcommand:${subcommand ?? ""}\n`);

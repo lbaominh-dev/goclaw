@@ -45,7 +45,7 @@ describe("buildOpencodeCommand", () => {
     );
 
     expect(command.command).toBe("opencode");
-    expect(command.args).toEqual(["run", "--model", "anthropic/claude-sonnet-4", "Refactor the worker runner"]);
+    expect(command.args).toEqual(["run", "--model", "anthropic/claude-sonnet-4", "--session", "session-1", "Refactor the worker runner"]);
   });
 
   test("falls back to a structured prompt when message is missing", () => {
@@ -71,6 +71,28 @@ describe("buildOpencodeCommand", () => {
     expect(command.args.at(-1)).toContain("runId: run-2");
     expect(command.args.at(-1)).toContain("sessionKey: session-2");
     expect(command.args.at(-1)).toContain("agentKey: agent-7");
+  });
+
+  test("reuses the chat session key as the worker conversation identity", () => {
+    const command = buildOpencodeCommand(
+      {
+        opencodeCommand: "opencode",
+        opencodeArgs: [],
+      },
+      {
+        jobId: "job-3",
+        runtimeKind: "opencode",
+        job: {
+          message: "Continue",
+          sessionKey: "agent:test:ws:direct:chat-1",
+        },
+        execution: { workspaceKey: "main" },
+        workspacePath: "/tmp/main",
+      },
+    );
+
+    expect(command.args).toContain("--session");
+    expect(command.args).toContain("agent:test:ws:direct:chat-1");
   });
 
   test("streams output and completes only after child exit", async () => {
@@ -108,12 +130,12 @@ describe("buildOpencodeCommand", () => {
     expect(sent).toContainEqual({
       type: "job.output",
       jobId: "job-1",
-      payload: { stream: "stdout", chunk: "hello\n" },
+      payload: { type: "Thinking", stream: "stdout", chunk: "hello\n" },
     });
     expect(sent).toContainEqual({
       type: "job.output",
       jobId: "job-1",
-      payload: { stream: "stderr", chunk: "warn\n" },
+      payload: { type: "Error", stream: "stderr", chunk: "warn\n" },
     });
   });
 

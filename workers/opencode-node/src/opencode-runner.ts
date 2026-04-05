@@ -38,9 +38,13 @@ export function buildOpencodePrompt(payload: RunnerPayload): string {
 }
 
 export function buildOpencodeCommand(config: RunnerConfig, payload: RunnerPayload): { command: string; args: string[] } {
+	const job = (payload.job ?? {}) as Record<string, unknown>;
+	const sessionKey = typeof job.sessionKey === "string" ? job.sessionKey.trim() : "";
+	const sessionArgs = sessionKey ? ["--session", sessionKey] : [];
+
   return {
     command: config.opencodeCommand,
-    args: ["run", ...config.opencodeArgs, buildOpencodePrompt(payload)],
+    args: ["run", ...config.opencodeArgs, ...sessionArgs, buildOpencodePrompt(payload)],
   };
 }
 
@@ -91,7 +95,7 @@ export function createOpencodeRunner(
         control.send({
           type: "job.output",
           jobId: payload.jobId,
-          payload: { stream: "stdout", chunk: String(chunk) },
+          payload: { type: "Thinking", stream: "stdout", chunk: String(chunk) },
         });
       });
 
@@ -99,7 +103,7 @@ export function createOpencodeRunner(
         control.send({
           type: "job.output",
           jobId: payload.jobId,
-          payload: { stream: "stderr", chunk: String(chunk) },
+          payload: { type: "Error", stream: "stderr", chunk: String(chunk) },
         });
       });
 

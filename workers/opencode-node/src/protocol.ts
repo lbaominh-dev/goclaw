@@ -23,9 +23,11 @@ export type Envelope = z.infer<typeof EnvelopeSchema>;
 export type DispatchPayload = z.infer<typeof DispatchPayloadSchema>;
 export type CancelPayload = z.infer<typeof CancelPayloadSchema>;
 
+export type WorkerOutputType = "Thinking" | "Action" | "Error" | "Final";
+
 export type WorkerReply =
   | { type: "job.started"; jobId: string }
-  | { type: "job.output"; jobId: string; payload: { stream: "stdout" | "stderr"; chunk: string } }
+  | { type: "job.output"; jobId: string; payload: { type?: WorkerOutputType; stream?: "stdout" | "stderr"; chunk: string } }
   | { type: "job.completed"; jobId: string; payload: unknown }
   | { type: "job.failed"; jobId: string; error: { code?: string; message: string } };
 
