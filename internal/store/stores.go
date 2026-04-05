@@ -35,4 +35,5 @@ type Stores struct {
 	SubagentTasks         SubagentTaskStore
 	Workers               WorkerStore
 	WorkerEndpoints       WorkerEndpointStore
+	SecureCLIGrants       SecureCLIAgentGrantStore
 }
