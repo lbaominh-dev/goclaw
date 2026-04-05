@@ -105,6 +105,7 @@ type ResolverDeps struct {
 
 	// Local worker execution backend for execution_mode=local_worker.
 	LocalWorkerDispatcher *localworker.Dispatcher
+	LocalWorkerWaiters    *localworker.WaiterRegistry
 }
 
 // NewManagedResolver creates a ResolverFunc that builds Loops from DB agent data.
@@ -426,6 +427,7 @@ func NewManagedResolver(deps ResolverDeps) ResolverFunc {
 			MCPPool:                deps.MCPPool,
 			MCPUserCredSrvs:        mcpUserCredSrvs,
 			LocalWorkerDispatcher:  deps.LocalWorkerDispatcher,
+			LocalWorkerWaiters:     deps.LocalWorkerWaiters,
 		})
 
 		slog.Info("resolved agent from DB", "agent", agentKey, "model", ag.Model, "provider", ag.Provider)

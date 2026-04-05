@@ -53,7 +53,7 @@ func wireExtras(
 	outboundManager *localworker.OutboundManager,
 	workerManager *localworker.Manager,
 	redisClient any, // nil when built without -tags redis or when Redis is unconfigured
-) (*tools.ContextFileInterceptor, *mcpbridge.Pool, *media.Store, tools.PostTurnProcessor) {
+) (*tools.ContextFileInterceptor, *mcpbridge.Pool, *media.Store, tools.PostTurnProcessor, *localworker.WaiterRegistry) {
 	// 1. Build cache instances (in-memory or Redis depending on build tags)
 	agentCtxCache, userCtxCache := makeCaches(redisClient)
 
@@ -132,6 +132,7 @@ func wireExtras(
 		skillAccessStore = sas
 	}
 	localWorkerDispatcher := localworker.NewDispatcher(stores.Workers, outboundManager)
+	localWorkerWaiters := localworker.NewWaiterRegistry()
 
 	resolver := agent.NewManagedResolver(agent.ResolverDeps{
 		AgentStore:             stores.Agents,
@@ -174,6 +175,7 @@ func wireExtras(
 		SkillTenantCfgs:        stores.SkillTenantCfgs,
 		Workspace:              workspace,
 		LocalWorkerDispatcher:  localWorkerDispatcher,
+		LocalWorkerWaiters:     localWorkerWaiters,
 		OnEvent: func(event agent.AgentEvent) {
 			// Sign /v1/files/ and /v1/media/ URLs in content before delivery.
 			// Sessions store clean paths; signing happens only at delivery time.
@@ -535,7 +537,7 @@ func wireExtras(
 	})
 
 	slog.Info("resolver + interceptors + cache subscribers wired")
-	return contextFileInterceptor, mcpPool, mediaStore, postTurn
+	return contextFileInterceptor, mcpPool, mediaStore, postTurn, localWorkerWaiters
 }
 
 // kgSettings holds KG extraction settings from the builtin_tools table.
