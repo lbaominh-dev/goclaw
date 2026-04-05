@@ -189,6 +189,7 @@ type Loop struct {
 
 	// Local worker execution path (nil for normal server-run agents).
 	localWorkerDispatcher *localworker.Dispatcher
+	localWorkerWaiters    *localworker.WaiterRegistry
 }
 
 // AgentEvent is emitted during agent execution for WS broadcasting.
@@ -332,6 +333,7 @@ type LoopConfig struct {
 	MCPUserCredSrvs []store.MCPAccessInfo // servers needing per-user creds
 
 	LocalWorkerDispatcher *localworker.Dispatcher
+	LocalWorkerWaiters    *localworker.WaiterRegistry
 }
 
 const defaultMaxTokens = config.DefaultMaxTokens
@@ -435,6 +437,7 @@ func NewLoop(cfg LoopConfig) *Loop {
 		mcpPool:                cfg.MCPPool,
 		mcpUserCredSrvs:        cfg.MCPUserCredSrvs,
 		localWorkerDispatcher:  cfg.LocalWorkerDispatcher,
+		localWorkerWaiters:     cfg.LocalWorkerWaiters,
 	}
 }
 

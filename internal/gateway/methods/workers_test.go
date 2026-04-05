@@ -994,6 +994,47 @@ func TestOutboundWorkerMessage_CompletedCompletesLinkedTask(t *testing.T) {
 	}
 }
 
+func TestOutboundWorkerMessage_CompletedNotifiesWaiter(t *testing.T) {
+	ctx := context.Background()
+	tenantID := uuid.New()
+	endpointID := uuid.New()
+	jobID := uuid.New()
+	workerStore := &workerStoreStub{
+		jobs: map[uuid.UUID]*store.WorkerJobData{
+			jobID: {
+				BaseModel: store.BaseModel{ID: jobID},
+				TenantID:  tenantID,
+				WorkerID:  endpointID.String(),
+				Status:    store.WorkerJobStatusRunning,
+			},
+		},
+	}
+	waiters := localworker.NewWaiterRegistry()
+	methods := NewWorkersMethods(workerStore, localworker.NewManager(), nil, nil, nil)
+	methods.SetWaiterRegistry(waiters)
+
+	ch := waiters.Subscribe(jobID.String())
+	defer waiters.Unsubscribe(jobID.String(), ch)
+
+	err := methods.HandleOutboundWorkerMessage(store.WithTenantID(ctx, tenantID), endpointID, localworker.WorkerReplyEnvelope{
+		Type:    "job.completed",
+		JobID:   jobID.String(),
+		Payload: json.RawMessage(`{"content":"done"}`),
+	})
+	if err != nil {
+		t.Fatalf("HandleOutboundWorkerMessage error: %v", err)
+	}
+
+	select {
+	case msg := <-ch:
+		if msg.Type != "job.completed" {
+			t.Fatalf("message type = %q, want %q", msg.Type, "job.completed")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for waiter notification")
+	}
+}
+
 func TestOutboundWorkerMessage_FailedFailsLinkedTask(t *testing.T) {
 	ctx := context.Background()
 	tenantID := uuid.New()

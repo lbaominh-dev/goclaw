@@ -23,10 +23,18 @@ type WorkersMethods struct {
 	teams    store.TeamStore
 	events   bus.EventPublisher
 	postTurn tools.PostTurnProcessor
+	waiters  *localworker.WaiterRegistry
 }
 
 func NewWorkersMethods(workers store.WorkerStore, manager *localworker.Manager, teams store.TeamStore, events bus.EventPublisher, postTurn tools.PostTurnProcessor) *WorkersMethods {
 	return &WorkersMethods{workers: workers, manager: manager, teams: teams, events: events, postTurn: postTurn}
+}
+
+func (m *WorkersMethods) SetWaiterRegistry(waiters *localworker.WaiterRegistry) {
+	if m == nil {
+		return
+	}
+	m.waiters = waiters
 }
 
 func (m *WorkersMethods) Register(router *gateway.MethodRouter) {
@@ -225,6 +233,9 @@ func (m *WorkersMethods) HandleOutboundWorkerMessage(ctx context.Context, endpoi
 	}
 	if job.TenantID != store.TenantIDFromContext(ctx) || job.WorkerID != endpointID.String() {
 		return fmt.Errorf("worker endpoint %s does not own job %s", endpointID, jobID)
+	}
+	if m.waiters != nil {
+		m.waiters.Publish(jobID.String(), reply)
 	}
 	switch strings.TrimSpace(reply.Type) {
 	case "job.started":

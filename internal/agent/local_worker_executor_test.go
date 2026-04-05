@@ -37,6 +37,9 @@ func TestRunRequest_LocalWorkerMember_DispatchesJobInsteadOfProvider(t *testing.
 		},
 	}
 	outbound := localworker.NewOutboundManager(endpointStore)
+	waiters := localworker.NewWaiterRegistry()
+	outbound.SetReplyHandler(&localWorkerReplyHandler{waiters: waiters})
+	var dispatchEnvelope localworker.OutboundEnvelope
 
 	loop := newLocalWorkerTestLoop(t, provider, tenantID, agentID)
 	setLoopStringField(t, loop, "executionMode", store.AgentExecutionModeLocalWorker)
@@ -45,6 +48,7 @@ func TestRunRequest_LocalWorkerMember_DispatchesJobInsteadOfProvider(t *testing.
 	setLoopStringField(t, loop, "workerEndpointID", endpointID.String())
 	setLoopStringField(t, loop, "workspaceKey", "desktop-main")
 	setLoopDispatcherField(t, loop, outbound, workerStore)
+	setLoopWaiterField(t, loop, waiters)
 
 	req := RunRequest{
 		SessionKey:        "agent:test:ws:direct:chat-1",
@@ -67,6 +71,22 @@ func TestRunRequest_LocalWorkerMember_DispatchesJobInsteadOfProvider(t *testing.
 		LocalKey:          "room-7:topic:2",
 	}
 
+	go func() {
+		endpointServer.waitForMessages(t, 1)
+		if endpointServer.messageCount() != 1 {
+			t.Fatalf("dispatch envelopes = %d, want 1", endpointServer.messageCount())
+		}
+		if err := json.Unmarshal(endpointServer.message(0), &dispatchEnvelope); err != nil {
+			t.Fatalf("unmarshal dispatch envelope: %v", err)
+		}
+		if dispatchEnvelope.Type != localworker.OutboundEnvelopeJobDispatch {
+			t.Fatalf("dispatch type = %q, want %q", dispatchEnvelope.Type, localworker.OutboundEnvelopeJobDispatch)
+		}
+		jobID := workerStore.jobs[0].ID.String()
+		endpointServer.replyJSON(t, map[string]any{"type": "job.started", "jobId": jobID})
+		endpointServer.replyJSON(t, map[string]any{"type": "job.completed", "jobId": jobID, "payload": map[string]any{"content": "done"}})
+	}()
+
 	result, err := loop.Run(store.WithTenantID(context.Background(), tenantID), req)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -78,7 +98,13 @@ func TestRunRequest_LocalWorkerMember_DispatchesJobInsteadOfProvider(t *testing.
 		t.Fatalf("RunID = %q, want %q", result.RunID, req.RunID)
 	}
 	if result.Iterations != 0 {
-		t.Fatalf("Iterations = %d, want 0 for queued worker run", result.Iterations)
+		t.Fatalf("Iterations = %d, want 0 for local worker run", result.Iterations)
+	}
+	if result.Content != "done" {
+		t.Fatalf("Content = %q, want %q", result.Content, "done")
+	}
+	if result.Queued {
+		t.Fatalf("Run result = %+v, want synchronous non-queued result", result)
 	}
 	if provider.chatCalls != 0 || provider.chatStreamCalls != 0 {
 		t.Fatalf("provider should not be used, got chat=%d stream=%d", provider.chatCalls, provider.chatStreamCalls)
@@ -108,17 +134,6 @@ func TestRunRequest_LocalWorkerMember_DispatchesJobInsteadOfProvider(t *testing.
 	}
 	if job.TaskID == nil || *job.TaskID != taskID {
 		t.Fatalf("job task_id = %v, want %s", job.TaskID, taskID)
-	}
-	endpointServer.waitForMessages(t, 1)
-	if endpointServer.messageCount() != 1 {
-		t.Fatalf("dispatch envelopes = %d, want 1", endpointServer.messageCount())
-	}
-	var dispatchEnvelope localworker.OutboundEnvelope
-	if err := json.Unmarshal(endpointServer.message(0), &dispatchEnvelope); err != nil {
-		t.Fatalf("unmarshal dispatch envelope: %v", err)
-	}
-	if dispatchEnvelope.Type != localworker.OutboundEnvelopeJobDispatch {
-		t.Fatalf("dispatch type = %q, want %q", dispatchEnvelope.Type, localworker.OutboundEnvelopeJobDispatch)
 	}
 	dispatchPayloadBytes, err := json.Marshal(dispatchEnvelope.Payload)
 	if err != nil {
@@ -253,6 +268,8 @@ func TestRunRequest_LocalWorkerMember_UsesWorkerEndpointID(t *testing.T) {
 		},
 	}
 	outbound := localworker.NewOutboundManager(endpointStore)
+	waiters := localworker.NewWaiterRegistry()
+	outbound.SetReplyHandler(&localWorkerReplyHandler{waiters: waiters})
 
 	loop := newLocalWorkerTestLoop(t, provider, tenantID, agentID)
 	setLoopStringField(t, loop, "executionMode", store.AgentExecutionModeLocalWorker)
@@ -260,6 +277,23 @@ func TestRunRequest_LocalWorkerMember_UsesWorkerEndpointID(t *testing.T) {
 	setLoopStringField(t, loop, "boundWorkerID", "legacy-worker-id")
 	setLoopStringField(t, loop, "workerEndpointID", endpointID.String())
 	setLoopDispatcherField(t, loop, outbound, workerStore)
+	setLoopWaiterField(t, loop, waiters)
+
+	go func() {
+		endpointServer.waitForMessages(t, 1)
+		if endpointServer.messageCount() != 1 {
+			t.Fatalf("dispatch envelopes = %d, want 1", endpointServer.messageCount())
+		}
+		var dispatchEnvelope localworker.OutboundEnvelope
+		if err := json.Unmarshal(endpointServer.message(0), &dispatchEnvelope); err != nil {
+			t.Fatalf("unmarshal dispatch envelope: %v", err)
+		}
+		if dispatchEnvelope.Type != localworker.OutboundEnvelopeJobDispatch {
+			t.Fatalf("dispatch type = %q, want %q", dispatchEnvelope.Type, localworker.OutboundEnvelopeJobDispatch)
+		}
+		jobID := workerStore.jobs[0].ID.String()
+		endpointServer.replyJSON(t, map[string]any{"type": "job.completed", "jobId": jobID, "payload": map[string]any{"content": "done"}})
+	}()
 
 	result, err := loop.Run(store.WithTenantID(context.Background(), tenantID), RunRequest{
 		SessionKey:  "agent:test:ws:direct:chat-endpoint",
@@ -274,25 +308,17 @@ func TestRunRequest_LocalWorkerMember_UsesWorkerEndpointID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if result == nil || !result.Queued {
-		t.Fatalf("Run result = %+v, want queued local worker result", result)
+	if result == nil {
+		t.Fatal("Run returned nil result")
+	}
+	if result.Queued {
+		t.Fatalf("Run result = %+v, want synchronous local worker result", result)
 	}
 	if len(workerStore.jobs) != 1 {
 		t.Fatalf("created jobs = %d, want 1", len(workerStore.jobs))
 	}
 	if workerStore.jobs[0].WorkerID != endpointID.String() {
 		t.Fatalf("job worker_id = %q, want endpoint id %q", workerStore.jobs[0].WorkerID, endpointID.String())
-	}
-	endpointServer.waitForMessages(t, 1)
-	if endpointServer.messageCount() != 1 {
-		t.Fatalf("dispatch envelopes = %d, want 1", endpointServer.messageCount())
-	}
-	var dispatchEnvelope localworker.OutboundEnvelope
-	if err := json.Unmarshal(endpointServer.message(0), &dispatchEnvelope); err != nil {
-		t.Fatalf("unmarshal dispatch envelope: %v", err)
-	}
-	if dispatchEnvelope.Type != localworker.OutboundEnvelopeJobDispatch {
-		t.Fatalf("dispatch type = %q, want %q", dispatchEnvelope.Type, localworker.OutboundEnvelopeJobDispatch)
 	}
 	if provider.chatCalls != 0 || provider.chatStreamCalls != 0 {
 		t.Fatalf("provider should not be used, got chat=%d stream=%d", provider.chatCalls, provider.chatStreamCalls)
@@ -349,6 +375,8 @@ func TestRunRequest_LocalWorkerMember_DispatchesThroughOutboundManager(t *testin
 		},
 	}
 	outbound := localworker.NewOutboundManager(endpointStore)
+	waiters := localworker.NewWaiterRegistry()
+	outbound.SetReplyHandler(&localWorkerReplyHandler{waiters: waiters})
 
 	loop := newLocalWorkerTestLoop(t, provider, tenantID, agentID)
 	setLoopStringField(t, loop, "executionMode", store.AgentExecutionModeLocalWorker)
@@ -356,6 +384,16 @@ func TestRunRequest_LocalWorkerMember_DispatchesThroughOutboundManager(t *testin
 	setLoopStringField(t, loop, "boundWorkerID", "worker-offline")
 	setLoopStringField(t, loop, "workerEndpointID", endpointID.String())
 	setLoopDispatcherField(t, loop, outbound, workerStore)
+	setLoopWaiterField(t, loop, waiters)
+
+	go func() {
+		endpointServer.waitForMessages(t, 1)
+		if endpointServer.messageCount() != 1 {
+			t.Fatalf("dispatch envelopes = %d, want 1", endpointServer.messageCount())
+		}
+		jobID := workerStore.jobs[0].ID.String()
+		endpointServer.replyJSON(t, map[string]any{"type": "job.completed", "jobId": jobID, "payload": map[string]any{"content": "done"}})
+	}()
 
 	result, err := loop.Run(store.WithTenantID(context.Background(), tenantID), RunRequest{
 		SessionKey:  "agent:test:ws:direct:chat-2",
@@ -370,8 +408,11 @@ func TestRunRequest_LocalWorkerMember_DispatchesThroughOutboundManager(t *testin
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if result == nil || !result.Queued {
-		t.Fatalf("Run result = %+v, want queued local worker result", result)
+	if result == nil {
+		t.Fatal("Run returned nil result")
+	}
+	if result.Queued {
+		t.Fatalf("Run result = %+v, want synchronous local worker result", result)
 	}
 	if provider.chatCalls != 0 || provider.chatStreamCalls != 0 {
 		t.Fatalf("provider should not be used, got chat=%d stream=%d", provider.chatCalls, provider.chatStreamCalls)
@@ -379,9 +420,73 @@ func TestRunRequest_LocalWorkerMember_DispatchesThroughOutboundManager(t *testin
 	if len(workerStore.jobs) != 1 {
 		t.Fatalf("created jobs = %d, want 1", len(workerStore.jobs))
 	}
-	endpointServer.waitForMessages(t, 1)
 	if endpointStore.getCalls == 0 {
 		t.Fatal("expected outbound manager to resolve endpoint before dispatch")
+	}
+}
+
+func TestRunRequest_LocalWorkerMember_WaitsForWorkerCompletion(t *testing.T) {
+	tenantID := uuid.New()
+	agentID := uuid.New()
+	provider := &localWorkerTestProvider{}
+	workerStore := &localWorkerTestStore{}
+	endpointID := uuid.New()
+	endpointServer := newLocalWorkerOutboundTestServer(t, "Bearer endpoint-token")
+	endpointStore := &localWorkerTestEndpointStore{
+		endpoint: &store.WorkerEndpointData{
+			BaseModel:   store.BaseModel{ID: endpointID},
+			TenantID:    tenantID,
+			Name:        "worker endpoint",
+			EndpointURL: localWorkerHTTPToWebsocketURL(endpointServer.server.URL),
+			AuthToken:   "Bearer endpoint-token",
+		},
+	}
+	outbound := localworker.NewOutboundManager(endpointStore)
+	waiters := localworker.NewWaiterRegistry()
+	outbound.SetReplyHandler(&localWorkerReplyHandler{waiters: waiters})
+
+	loop := newLocalWorkerTestLoop(t, provider, tenantID, agentID)
+	setLoopStringField(t, loop, "executionMode", store.AgentExecutionModeLocalWorker)
+	setLoopStringField(t, loop, "localRuntimeKind", "opencode")
+	setLoopStringField(t, loop, "workerEndpointID", endpointID.String())
+	setLoopDispatcherField(t, loop, outbound, workerStore)
+	setLoopWaiterField(t, loop, waiters)
+
+	go func() {
+		endpointServer.waitForMessages(t, 1)
+		if len(workerStore.jobs) == 0 {
+			return
+		}
+		jobID := workerStore.jobs[0].ID.String()
+		endpointServer.replyJSON(t, map[string]any{"type": "job.started", "jobId": jobID})
+		endpointServer.replyJSON(t, map[string]any{"type": "job.output", "jobId": jobID, "payload": map[string]any{"delta": "working"}})
+		endpointServer.replyJSON(t, map[string]any{"type": "job.completed", "jobId": jobID, "payload": map[string]any{"content": "worker done"}})
+	}()
+
+	result, err := loop.Run(store.WithTenantID(context.Background(), tenantID), RunRequest{
+		SessionKey:  "agent:test:ws:direct:chat-sync",
+		Message:     "Use local worker synchronously",
+		Channel:     "ws",
+		ChannelType: "web",
+		ChatID:      "chat-sync",
+		PeerKind:    "direct",
+		RunID:       "run-sync",
+		UserID:      "user-sync",
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Run returned nil result")
+	}
+	if result.Queued {
+		t.Fatalf("Run result = %+v, want synchronous non-queued result", result)
+	}
+	if result.Content != "worker done" {
+		t.Fatalf("Content = %q, want %q", result.Content, "worker done")
+	}
+	if provider.chatCalls != 0 || provider.chatStreamCalls != 0 {
+		t.Fatalf("provider should not be used, got chat=%d stream=%d", provider.chatCalls, provider.chatStreamCalls)
 	}
 }
 
@@ -536,6 +641,7 @@ type localWorkerOutboundTestServer struct {
 	closeAfterNextRead bool
 
 	mu         sync.Mutex
+	conn       *websocket.Conn
 	messages   [][]byte
 	messageCh  chan struct{}
 	upgradeErr error
@@ -562,9 +668,19 @@ func newLocalWorkerOutboundTestServer(t *testing.T, requiredToken string) *local
 			ts.mu.Unlock()
 			return
 		}
+		ts.mu.Lock()
+		ts.conn = conn
+		ts.mu.Unlock()
 
 		go func() {
-			defer conn.Close()
+			defer func() {
+				ts.mu.Lock()
+				if ts.conn == conn {
+					ts.conn = nil
+				}
+				ts.mu.Unlock()
+				conn.Close()
+			}()
 			for {
 				_, msg, err := conn.ReadMessage()
 				if err != nil {
@@ -626,6 +742,19 @@ func (s *localWorkerOutboundTestServer) messageCount() int {
 	return len(s.messages)
 }
 
+func (s *localWorkerOutboundTestServer) replyJSON(t *testing.T, payload any) {
+	t.Helper()
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		t.Fatal("no outbound worker websocket connection available")
+	}
+	if err := conn.WriteJSON(payload); err != nil {
+		t.Fatalf("write reply json: %v", err)
+	}
+}
+
 func localWorkerHTTPToWebsocketURL(raw string) string {
 	if strings.HasPrefix(raw, "https://") {
 		return "wss://" + strings.TrimPrefix(raw, "https://")
@@ -664,17 +793,30 @@ func newLocalWorkerTestLoop(t *testing.T, provider providers.Provider, tenantID,
 	t.Helper()
 	sessStore := newLocalWorkerSessionStore()
 	loop := NewLoop(LoopConfig{
-		ID:            "member-local-worker",
-		AgentUUID:     agentID,
-		TenantID:      tenantID,
-		AgentType:     store.AgentTypeOpen,
-		Provider:      provider,
-		Model:         "test-model",
-		Sessions:      sessStore,
-		MaxIterations: 1,
-		OnEvent:       func(AgentEvent) {},
+		ID:                 "member-local-worker",
+		AgentUUID:          agentID,
+		TenantID:           tenantID,
+		AgentType:          store.AgentTypeOpen,
+		Provider:           provider,
+		Model:              "test-model",
+		Sessions:           sessStore,
+		MaxIterations:      1,
+		OnEvent:            func(AgentEvent) {},
+		LocalWorkerWaiters: localworker.NewWaiterRegistry(),
 	})
 	return loop
+}
+
+type localWorkerReplyHandler struct {
+	waiters *localworker.WaiterRegistry
+}
+
+func (h *localWorkerReplyHandler) HandleOutboundWorkerMessage(_ context.Context, _ uuid.UUID, message localworker.WorkerReplyEnvelope) error {
+	if h == nil || h.waiters == nil {
+		return nil
+	}
+	h.waiters.Publish(message.JobID, message)
+	return nil
 }
 
 type localWorkerSessionStore struct {
@@ -826,6 +968,16 @@ func setLoopDispatcherField(t *testing.T, loop *Loop, transport any, workerStore
 	if sf := f.Elem().FieldByName("workers"); sf.IsValid() {
 		setReflectValue(t, sf, reflect.ValueOf(workerStore))
 	}
+}
+
+func setLoopWaiterField(t *testing.T, loop *Loop, waiters *localworker.WaiterRegistry) {
+	t.Helper()
+	v := reflect.ValueOf(loop).Elem()
+	f := v.FieldByName("localWorkerWaiters")
+	if !f.IsValid() {
+		t.Fatalf("Loop field %q not found", "localWorkerWaiters")
+	}
+	setReflectValue(t, f, reflect.ValueOf(waiters))
 }
 
 func setLocalWorkerDispatcherTransport(t *testing.T, dispatcher reflect.Value, transport any) {
